@@ -292,12 +292,34 @@ DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕�
 
 高命中率的前提是前缀字节稳定。以下情况会让缓存 miss，表现为每轮 `cache_read_input_tokens` 长期为 0：
 
-- **system prompt / 工具定义变动** —— 会话中途改了工具集或提示词层（如切星域、加减 skill）
+- **system prompt / 工具定义变动** —— 会话中途改了工具集或提示词层（如切星域、加减 skill；禅模式晋升是刻意的一次性实例，见下文「禅模式」）
 - **模型切换** —— 不同模型缓存 key 不同，换模型后从 0 重建
 - **字节级差异** —— 消息内容含时间戳、随机 ID 等不稳定字节
 - **跨边界重写** —— `/compact`（仅 `turn===0` 重写历史）、`/cd` 切项目（新 user 边界断尾）
 
 排查：① `rivet logs`（或 TUI 里 `/logs`）直接打出本会话的数据根与 `cache-log.jsonl` / `sensorium.jsonl` 路径；② 打开会话 `.jsonl` 搜 `cache_read_input_tokens` 看各轮命中；③ 需要全量遥测时设 `RIVET_DEBUG_TELEMETRY=1`（或任意非空值）后查 `sensorium.jsonl`；④ `npm exec -- tsx scripts/verify-cache-hit-rate.ts` 模拟多轮对话验证。路径总览见下方「日志与排查」。
+
+### 禅模式（Zen Mode）：读专注开局，动手即解锁
+
+新会话默认以收窄的只读工具面开局（`read_file` / `grep` / `glob` / `repo_map` + `zen_unlock` 声明工具）——模型在开局不被全量工具 schema 与动态注入干扰；需要动手时，调用面外工具或 `zen_unlock` 即晋升全量面并放行该调用，零拒绝、零额外往返。worker / 子代理会话永不进禅（工具面由委派方决定）。
+
+晋升通道（zen → full，单向不回摆，每会话至多一次）：
+
+- **triage 分诊** —— 首消息单行且 ≤80 字视为琐碎请求，在首个请求发出前晋升：**缓存零断点**（收窄面从未上 wire）
+- **tool** —— 禅相位内调用面外工具或 `zen_unlock`：立即晋升并放行（发生在 turn 中途）
+- **timeout** —— 禅相位持续 ≥8 个用户 turn 未动手，自动晋升
+- **`/fast`** —— 用户手动跳过
+
+**对前缀缓存的影响（为什么偶尔会"碎"一次）**：晋升瞬间请求的 `tools` 字段从 ~5 个定义跳回全量面——这是与 system prompt 同级的前缀身份变更，当次请求缓存整段重建（实测形态：晋升当轮命中率砸低，下一轮立即回到 99% 稳态）。system prompt / 冻结前缀 / 消息历史 / 模型全程不动；禅相位对动态注入的裁剪（appendixLean）发生在前缀之后的 appendix，零缓存损伤。观测：会话 `meta.json` 落盘 `zenPhase` / `zenPromoteReason`，`cache-log.jsonl` 里晋升当轮的 `toolsUpdated` 事件就是断点位置。triage 通道已让大部分琐碎会话连这一次断点都不出现；要彻底关闭：
+
+```json
+// ~/.rivet/config.json 或项目 .rivet-config.json
+{ "tools": { "zen": { "enabled": false } } }
+```
+
+可选配置：`faceMode: "structuredRead"`（读面附加 `file_info` / `related_tests` / `repo_graph` / `semantic_search` / `read_section`）、`timeoutSteps`（0 = 禁用超时晋升）、`triage.maxChars`、`appendixLean`。
+
+> 注：桌面端快捷键 `⌘/Ctrl+.` 的「Zen 模式」是隐藏侧栏的纯 UI 专注模式——同名不同物，对缓存无任何影响。
 
 ### 💰 API 成本控制
 

@@ -26,8 +26,8 @@
       "ceiling": 2511
     },
     "src/config/manager.ts": {
-      "ceiling": 2682,
-      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。 2648→2664：config login 子命令（OAuth 登录落地，/login 幽灵指引闭环）——case +12、帮助文本 +1、帮助示例区 +3。 2664→2682：setDefaultModelConfig 扩展 defaultEffort（undefined=不动/null·auto=删字段/显式档=落盘，+17）——/model 面板 effort 随默认持久化（CC 对标）。 2682→2643：migratePresetModelBackfill 迁出至 preset-model-backfill.ts（结构棘轮拆分；随迁收紧 userSaved 判据——用户删模型不再被预设回流）。"
+      "ceiling": 2689,
+      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。 2648→2664：config login 子命令（OAuth 登录落地，/login 幽灵指引闭环）——case +12、帮助文本 +1、帮助示例区 +3。 2664→2682：setDefaultModelConfig 扩展 defaultEffort（undefined=不动/null·auto=删字段/显式档=落盘，+17）——/model 面板 effort 随默认持久化（CC 对标）。 2682→2643：migratePresetModelBackfill 迁出至 preset-model-backfill.ts（结构棘轮拆分；随迁收紧 userSaved 判据——用户删模型不再被预设回流）。 2682→2689：账本对齐实际行数（存量已超限，P0-1 同 PR 收口，2026-09-04）。"
     },
     "src/main.ts": {
       "ceiling": 2382,
@@ -41,8 +41,8 @@
       "note": "2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由 / （审批路由单一职责功能增长，+29 行）。 2099→2111：T11 超时恢复指引 TOOL_TIMEOUT_RECOVERY_HINT（+7）+ 存量对齐（HEAD 2106 已超 7，2026-08-30）。 →2139：账本对齐——trace 扩 durationMs/cu 字段 + computer_use LITE 遥测写入（W2，2026-08-31）。 →2151：Zen P0——未注册工具报错附加 zen_unlock 行动指引（deps 字段 + execute promise catch 包装，+12，2026-09-01）。"
     },
     "src/agent/tool-execution.ts": {
-      "ceiling": 814,
-      "note": "810→814：Zen P0——ToolExecutionDeps.getZenUnregisteredHint 字段 + buildDeps 转发（+4，2026-09-01）。810 为入账时存量，已超 800 红线但未登记；本次随改动一并纳入点名棘轮收口（纯数据 diff 即评审对象）。"
+      "ceiling": 815,
+      "note": "810→814：Zen P0——ToolExecutionDeps.getZenUnregisteredHint 字段 + buildDeps 转发（+4，2026-09-01）。810 为入账时存量，已超 800 红线但未登记；本次随改动一并纳入点名棘轮收口（纯数据 diff 即评审对象）。 814→815：P0-1 polling-storm guard 记录 toolPollingClasses（+1，2026-09-04）。"
     },
     "src/server/session-routes.ts": {
       "ceiling": 2178,
@@ -68,12 +68,12 @@
       "note": "1492→1563：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/turn-orchestrator.ts": {
-      "ceiling": 1471,
-      "note": "1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。"
+      "ceiling": 1501,
+      "note": "1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。 1471→1501：P0-1 polling-storm guard 接线——deps getFilesModifiedCount + evaluatePollingStorm 调用（+30，2026-09-04）。"
     },
     "src/agent/loop-factory.ts": {
-      "ceiling": 1526,
-      "note": "1470→1473：注入 B2 收敛轨迹 getter。1473→1487→1505：接线记忆形成侧（autoCapture）+ 会话结束巩固（sessionConsolidation）。1505→1509：worker 记忆隔离边界 guard。1509→1511：Zen Mode 解锁点 onZenEscape 接线（+2，2026-08-29）。 1511→1513：zen_unlock onZenUnlock 接线（+2，2026-08-29）。 →1514：账本对齐——computer_use 指标接 telemetryWriter（W2 遥测，+1，2026-08-31）。 →1516：onTurnMetrics/getTurnMetrics 接线（W-stats，2026-08-31）。 →1523：decode 累计 + onTurnMetrics（W-stats P2-3，2026-09-01）。 →1524：审查 P2 收口——decodeMs 精确值优先于舍入 tps 反推（+1，2026-09-01）。 →1526：Zen P0——getZenUnregisteredHint 依赖注入（+2，2026-09-01）。"
+      "ceiling": 1527,
+      "note": "1470→1473：注入 B2 收敛轨迹 getter。1473→1487→1505：接线记忆形成侧（autoCapture）+ 会话结束巩固（sessionConsolidation）。1505→1509：worker 记忆隔离边界 guard。1509→1511：Zen Mode 解锁点 onZenEscape 接线（+2，2026-08-29）。 1511→1513：zen_unlock onZenUnlock 接线（+2，2026-08-29）。 →1514：账本对齐——computer_use 指标接 telemetryWriter（W2 遥测，+1，2026-08-31）。 →1516：onTurnMetrics/getTurnMetrics 接线（W-stats，2026-08-31）。 →1523：decode 累计 + onTurnMetrics（W-stats P2-3，2026-09-01）。 →1524：审查 P2 收口——decodeMs 精确值优先于舍入 tps 反推（+1，2026-09-01）。 →1526：Zen P0——getZenUnregisteredHint 依赖注入（+2，2026-09-01）。 1526→1527：P0-1 polling-storm guard getFilesModifiedCount 注入（+1，2026-09-04）。"
     },
     "src/agent/advisory-bus.ts": {
       "ceiling": 1273
@@ -161,8 +161,8 @@
       "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）956→962：RIVET_ORCHESTRATION_HINT 登记（+6）962→968：RIVET_ADAPTIVE_MEMORY 的 shadow/on/off 发布开关登记（+6）968→974：RIVET_MEMORY_AUTO_CAPTURE 登记（+6）974→980：RIVET_MEMORY_CONSOLIDATION 登记（+6）980→986：RIVET_MEMORY_BACKFILL 登记（+6，历史会话回填 opt-in 开关）986→1034：gen-env-registry.ts 全量再生成收口漂移（153→168 变量，含 SEA RIVET_STRONG_EXPERT_ROUTING/RIVET_WORKER_ISOLATION 等 2026-08-13 后入库未登记的 8+ 开关，+48，2026-09-02）。"
     },
     "src/server/config-routes.ts": {
-      "ceiling": 1066,
-      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。 1048→1055：账本对齐实际行数（合并 defc472c0 模型设置优化轮——预设来源标注/配置前预览路由，+7 净增）。 →1062：完全读写档（c0b4fb444 远端批次）——/config/approval 活体沙箱联动（unsandboxed→RIVET_SANDBOX env 即时翻，+7，2026-09-02 收束对齐）。 →1066：B6/L3 trust 四端点外提 config-routes-project-trust.ts 子模块——主表仅剩 import+spread+注释（+4），巨石内容净减 57 行（2026-09-02）。"
+      "ceiling": 1081,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。 1048→1055：账本对齐实际行数（合并 defc472c0 模型设置优化轮——预设来源标注/配置前预览路由，+7 净增）。 →1062：完全读写档（c0b4fb444 远端批次）——/config/approval 活体沙箱联动（unsandboxed→RIVET_SANDBOX env 即时翻，+7，2026-09-02 收束对齐）。 →1066：B6/L3 trust 四端点外提 config-routes-project-trust.ts 子模块——主表仅剩 import+spread+注释（+4），巨石内容净减 57 行（2026-09-02）。 1066→1081：账本对齐实际行数（存量已超限，P0-1 同 PR 收口，2026-09-04）。"
     },
     "src/pro/computer-use/cdp/driver.ts": {
       "ceiling": 910,

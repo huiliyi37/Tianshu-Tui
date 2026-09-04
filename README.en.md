@@ -269,12 +269,34 @@ Real-world hit rate: 95–99% steady state on long sessions. This is not "every 
 
 High hit rates depend on a byte-stable prefix. The cache will miss — showing `cache_read_input_tokens` stuck at 0 every turn — when:
 
-- **System prompt / tool definitions change** — tools or prompt layers change mid-session (e.g. switching star domain, adding/removing a skill)
+- **System prompt / tool definitions change** — tools or prompt layers change mid-session (e.g. switching star domain, adding/removing a skill; Zen Mode promotion is a deliberate one-time instance — see "Zen Mode" below)
 - **Model switch** — different models have different cache keys; switching models rebuilds from 0
 - **Byte-level drift** — message content contains unstable bytes like timestamps or random IDs
 - **Cross-boundary rewrites** — `/compact` (only rewrites history at `turn===0`), `/cd` (breaks the prefix tail at the new user boundary)
 
 To troubleshoot: ① confirm the data dir (desktop Settings → Storage, or `echo $RIVET_HOME`); ② open the session `.jsonl` and search `cache_read_input_tokens` to inspect each turn; ③ enable `RIVET_DEBUG_TELEMETRY=1` and inspect the `recall-summary` events in `sensorium.jsonl`; ④ run `npm exec -- tsx scripts/verify-cache-hit-rate.ts` to simulate a multi-turn conversation. Full details in the project's `AGENTS.md` "Cache troubleshooting" section.
+
+### Zen Mode: read-focused start, unlock on first write
+
+New sessions start by default with a narrowed read-only tool face (`read_file` / `grep` / `glob` / `repo_map` + the `zen_unlock` declaration tool), so the model is not distracted by the full tool schemas and dynamic injections at the start. When the task turns hands-on, calling an out-of-face tool or `zen_unlock` promotes the session to the full face and lets the call through — no refusal, no extra round-trip. Worker/subagent sessions never enter zen (their tool face is decided by the delegator).
+
+Promotion channels (zen → full, one-way, at most once per session):
+
+- **triage** — a first message that is single-line and ≤80 chars is treated as trivial and promoted before the very first request: **zero cache break** (the narrowed face never goes on the wire)
+- **tool** — calling an out-of-face tool or `zen_unlock` during the zen phase: promotes immediately and lets the call through (mid-turn)
+- **timeout** — auto-promotes after 8 user turns without hands-on action
+- **`/fast`** — manual user skip
+
+**Prefix-cache impact (why the cache "breaks" once in a while)**: at promotion, the request's `tools` field jumps from ~5 definitions back to the full face — a prefix-identity change on par with the system prompt, so that one request rebuilds the whole prefix (measured shape: the hit rate dips on the promotion turn, then returns to the 99% steady state on the very next turn). The system prompt, frozen prefix, message history, and model never change; the zen phase's trimming of dynamic injections (appendixLean) happens in the appendix *after* the prefix, with zero cache damage. Observability: the session `meta.json` persists `zenPhase` / `zenPromoteReason`, and the `toolsUpdated` event on the promotion turn in `cache-log.jsonl` marks the breakpoint. Triage already spares most trivial sessions from even this single break; to disable entirely:
+
+```json
+// ~/.rivet/config.json or project .rivet-config.json
+{ "tools": { "zen": { "enabled": false } } }
+```
+
+Optional knobs: `faceMode: "structuredRead"` (adds `file_info` / `related_tests` / `repo_graph` / `semantic_search` / `read_section` to the read face), `timeoutSteps` (0 disables timeout promotion), `triage.maxChars`, `appendixLean`.
+
+> Note: the desktop shortcut `⌘/Ctrl+.` "Zen mode" is a pure UI focus mode (hides the sidebar) — same name, different feature, zero cache impact.
 
 ### Subagent Orchestration
 

@@ -8,6 +8,7 @@
  *   DELETE /config/providers/:name          remove a provider
  *   DELETE /config/providers/:name/models/:modelId  remove a model from a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
+ *   DELETE /config/providers/:name/key      clear the stored key, keep the provider (default provider allowed)
  *   POST   /config/providers/test-key       probe a key against a provider's /models (setup-time validation; apiKey optional → falls back to the provider's stored key; ok responses carry the fetched model id list)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
@@ -35,6 +36,7 @@ import {
   updateProviderTunables,
   removeProvider,
   removeModel,
+  clearApiKey,
   setDefaultProvider,
   setApiKey,
   setApiKeyEnv,
@@ -390,6 +392,19 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         else if (envVar) setApiKeyEnv(name, envVar)
         else return { status: 400, body: { error: 'apiKey or apiKeyEnv required' } }
         return { status: 200, body: { ok: true, keyStatus: getApiKeyStatus(name) } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // 清除已保存的 key 但保留 provider（默认 provider 允许）——「首次安装删不掉
+    // key」的修复点。env 注入的 key 清不掉时 keyStatus 如实报回 source:'env'。
+    'DELETE /config/providers/:name/key': withAuth((_body, params) => {
+      const name = params?.name
+      if (!name) return { status: 400, body: { error: 'provider name is required' } }
+      try {
+        const result = clearApiKey(name)
+        return { status: 200, body: { ok: true, keyStatus: result.keyStatus, secretDeleted: result.secretDeleted } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

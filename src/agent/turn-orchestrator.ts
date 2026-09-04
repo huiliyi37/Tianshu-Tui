@@ -4,6 +4,7 @@ import type { ResourceSensorSnapshot } from './resource-sensor.js'
 import type { TurnBudget } from './turn-budget.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import type { TraceStore } from './trace-store.js'
+import { evaluatePollingStorm } from './trace-store.js'
 import type { ImportGraph } from './import-graph.js'
 import type { RiskAssessment } from './approval-risk.js'
 import type { PlanModeState } from './plan-mode.js'
@@ -147,6 +148,8 @@ export interface TurnOrchestratorDeps {
 
   // === Config ===
   getMaxTurns: () => number
+  /** 当前 evidence 已修改文件数——polling-storm guard 的推进信号。 */
+  getFilesModifiedCount: () => number
   /** C3 检查点间隔 — Auto 模式下每 N 轮暂停（0 = 关）。YOLO 和 Manual 模式不读此字段。 */
   getCheckpointEveryTurns: () => number
   /** C3 — build the progress digest attached to checkpoint pauses. */
@@ -444,6 +447,7 @@ export class TurnOrchestrator {
     // latch stays set, and the next user message gets routed to the steer
     // buffer instead of starting a new run.
     let finalTurnCompleted = false
+    const pollingStorm = { streak: 0, warned: false, lastFilesModifiedCount: this.deps.getFilesModifiedCount() }
     let actionIntentFiredThisRun = false
     let turnCallLimitAdvisoryFired = false
     // B1 readonly-spiral 的 run 级一次性标志：与 B2 对称——触发后本 run 不再
@@ -1004,6 +1008,32 @@ export class TurnOrchestrator {
             )
             finalTurnCompleted = true
             break
+          }
+
+          // P0-1 polling-storm guard：成功型轮询没有 error 指纹，doom-loop 门不拦；
+          // 这里用独立 pollingClass 轨迹先 warn 再 completeTurn，释放 running。
+          const pollingVerdict = evaluatePollingStorm(
+            pollingStorm,
+            r.traceStore.toolPollingClasses ?? [],
+            this.deps.getFilesModifiedCount(),
+          )
+          if (pollingVerdict.action === 'abort') {
+            this.emitStop({
+              source: 'tool-storm',
+              turn,
+              voluntary: false,
+              detail: `${pollingVerdict.className} ×${pollingVerdict.streak}`,
+            }, callbacks)
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: true, callbacks }),
+              signal!,
+              'post-turn-polling-storm',
+            )
+            finalTurnCompleted = true
+            break
+          }
+          if (pollingVerdict.action === 'warn') {
+            this.deps.appendSystemReminder(pollingVerdict.reminder, 'functional')
           }
 
           // ── Action-intent readonly gate（spec 2026-07-05）──

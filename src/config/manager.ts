@@ -1595,6 +1595,48 @@ export function setApiKeyEnv(providerName: string, envVar: string): void {
   saveConfig(cfg)
 }
 
+export interface ClearApiKeyResult {
+  name: string
+  /** 清除后再查的状态——env 注入的 key 清不掉，会如实报回 source:'env'。 */
+  keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
+  /** 是否已从 secrets.json 删除对应密钥。 */
+  secretDeleted: boolean
+  /** 其他 provider 仍引用同一 keyRef 时列出——密钥因此保留。 */
+  keyRefSharedWith: string[]
+}
+
+/**
+ * 清除 provider 上保存的 key，但保留 provider 本体与模型列表。允许清除默认
+ * provider——这正是「首次安装删不掉 key」的修复点：清 key 后 provider 变
+ * keyless，运行侧经 isModelSpecUsable fail-closed，/health configured 随之
+ * 翻回 setup 模式引导重配。env 注入的 key（apiKeyEnv 指向或 <NAME>_API_KEY
+ * 回退命中）不属于本函数可清除范围——配置引用清掉后若进程环境变量仍在，
+ * keyStatus 会如实报回 source:'env'，由 UI 引导去系统环境变量处理。
+ */
+export function clearApiKey(providerName: string): ClearApiKeyResult {
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  const keyRef = provider.keyRef
+  ;(provider as unknown as { apiKey?: string | null }).apiKey = null
+  ;(provider as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
+  ;(provider as unknown as { keyRef?: string | null }).keyRef = null
+  saveConfig(cfg)
+
+  // 与 removeProvider 同守卫：keyRef 仍被其他 provider 引用时保留密钥。
+  let secretDeleted = false
+  const keyRefSharedWith = keyRef
+    ? Object.entries(cfg.provider.providers)
+        .filter(([, p]) => p.keyRef === keyRef)
+        .map(([n]) => n)
+    : []
+  if (keyRef && keyRefSharedWith.length === 0 && readSecret(keyRef) !== undefined) {
+    deleteSecret(keyRef)
+    secretDeleted = true
+  }
+  return { name: providerName, keyStatus: getApiKeyStatus(providerName), secretDeleted, keyRefSharedWith }
+}
+
 export function getApiKeyStatus(providerName: string): { source: 'inline' | 'env' | 'none'; ref: string } {
   const provider = getProvider(providerName)
   if (!provider) return { source: 'none', ref: '' }

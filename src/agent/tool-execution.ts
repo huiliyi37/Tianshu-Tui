@@ -30,7 +30,7 @@ import { classifyFailure, isReadProbeInvocation, isTestRunInvocation, type Failu
 import { ToolAccumulator } from './tool-accumulator.js'
 import { ZEN_UNLOCK, ZEN_UNLOCK_RESULT, ZEN_UNLOCK_NOT_ZEN } from './zen-mode.js'
 import { guardLossyToolResult } from './negative-fact-detector.js'
-import { getToolStormLevel, type ToolStormLevel } from './trace-store.js'
+import { getToolStormLevel, recordToolPollingClass } from './trace-store.js'
 import { extractTrailingArtifactId, tierToolResult } from './tool-result-tiering.js'
 import {
   getInterventionLevel,
@@ -122,7 +122,7 @@ export interface ToolExecutionDeps {
   getEstimatedTokens?: () => number
   /** Tool name history — for tool storm detection. */
   getToolNameHistory?: () => string[]
-  /** Record a named fingerprint (tool name + fingerprint) */
+  /** Record a named fingerprint (tool name + fingerprint). */
   recordToolNamedFingerprint?: (fingerprint: string, toolName: string) => void
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
@@ -510,6 +510,7 @@ export class ToolExecutionController {
         const content = typeof tr.content === 'string' ? tr.content : ''
         this.accumulator.record({ toolName: tu.name, toolUseId: tu.id, content, turn: input.turn })
         this.deps.recordToolNamedFingerprint?.(fingerprintToolCall(tu.name, tu.input, 'running'), tu.name)
+        traceStore = recordToolPollingClass(traceStore, tu.name, tu.input)
       }
     }
     if (input.toolUses.length > 0) {

@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRouter } from '../index.js'
@@ -658,6 +658,92 @@ describe('provider delete: preset-name deadlock', () => {
     assert.equal(del.status, 200)
     assert.deepEqual(del.body, { ok: true, removed: 'relay-gone' })
     assert.equal(readSecret('relay-gone'), undefined)
+  })
+})
+
+describe('DELETE /config/providers/:name/key — 清除 key 保留 provider', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-clearkey-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  function writeProviderConfig(providers: Record<string, unknown>) {
+    writeFileSync(join(home, 'config.json'), JSON.stringify({
+      provider: { default: 'deepseek', providers },
+      pro: {},
+    }, null, 2) + '\n')
+  }
+
+  function keylessProvider(name: string) {
+    return {
+      name,
+      baseUrl: 'https://api.example.com/v1',
+      protocol: 'openai',
+      capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+      maxTokens: 8000,
+      models: [{ id: 'm', contextWindow: 128000, maxTokens: 8000 }],
+      userSaved: true,
+    }
+  }
+
+  it('清除默认 provider 的 key：secret 删除、provider 保留、default 不变', async () => {
+    // 首次安装形态：用户的第一个 key 落在默认 provider 上——清除必须被允许。
+    writeProviderConfig({ deepseek: { ...keylessProvider('deepseek'), keyRef: 'deepseek' } })
+    writeSecret('deepseek', 'sk-first-install')
+    const router = createRouter(buildConfigRoutes(TOKEN))
+
+    const res = await router('DELETE', '/config/providers/deepseek/key', {}, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { ok: boolean; keyStatus: { source: string; ref: string }; secretDeleted: boolean }
+    assert.equal(body.ok, true)
+    assert.equal(body.secretDeleted, true)
+    assert.notEqual(body.keyStatus.source, 'inline')
+    assert.equal(readSecret('deepseek'), undefined)
+
+    // provider 本体仍在列表里（keyless），default 仍是 deepseek。
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const names = (list.body as { providers: { name: string }[] }).providers.map(p => p.name)
+    assert.ok(names.includes('deepseek'))
+    const cfg = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))
+    assert.equal(cfg.provider.default, 'deepseek')
+  })
+
+  it('共享 keyRef 时保留 secret，最后一个引用清除才删', async () => {
+    writeProviderConfig({
+      deepseek: { ...keylessProvider('deepseek'), keyRef: 'shared-key' },
+      relay: { ...keylessProvider('relay'), keyRef: 'shared-key' },
+    })
+    writeSecret('shared-key', 'sk-shared')
+
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const first = await router('DELETE', '/config/providers/relay/key', {}, AUTH)
+    assert.equal(first.status, 200)
+    assert.equal((first.body as { secretDeleted: boolean }).secretDeleted, false)
+    assert.equal(readSecret('shared-key'), 'sk-shared')
+
+    const second = await router('DELETE', '/config/providers/deepseek/key', {}, AUTH)
+    assert.equal(second.status, 200)
+    assert.equal((second.body as { secretDeleted: boolean }).secretDeleted, true)
+    assert.equal(readSecret('shared-key'), undefined)
+  })
+
+  it('provider 不存在返回 400；未授权返回 401', async () => {
+    writeProviderConfig({})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const missing = await router('DELETE', '/config/providers/nope/key', {}, AUTH)
+    assert.equal(missing.status, 400)
+    const anon = await router('DELETE', '/config/providers/nope/key', {}, {})
+    assert.equal(anon.status, 401)
   })
 })
 

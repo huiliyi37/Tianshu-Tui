@@ -1181,6 +1181,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
+    getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     // 窗口感知提醒阈值（B1/B2）：1M 窗口下固定 12/4 轮太紧（会话 b1b4d856）。
     getContextWindow: () => self.getContextWindow(),
     // C3 — checkpoint brake applies only to auto-safe mode (high-risk tools

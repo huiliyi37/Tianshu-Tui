@@ -15,6 +15,9 @@ import {
   bashCommandClass,
   recordToolFingerprint,
   recordToolNamedFingerprint,
+  pollingClassOf,
+  recordToolPollingClass,
+  getPollingStormLevel,
   getDoomLoopThresholds,
   NORMAL_DOOM_THRESHOLDS,
   GOAL_DOOM_THRESHOLDS,
@@ -175,6 +178,49 @@ describe('recordToolNamedFingerprint', () => {
     assert.equal(store.toolNameHistory!.length, 20)
     assert.equal(store.toolNameHistory![0], 'tool5')
     assert.equal(store.toolNameHistory![19], 'tool24')
+  })
+})
+
+describe('polling-storm class tracking (P0-1)', () => {
+  it('pollingClassOf only tracks bash + observation tools', () => {
+    assert.equal(pollingClassOf('bash', { command: 'curl -s localhost:3000/status' }), 'bash:curl')
+    assert.equal(pollingClassOf('job', { action: 'list' }), 'job')
+    assert.equal(pollingClassOf('browser_debug', { action: 'screenshot' }), 'browser_debug')
+    assert.equal(pollingClassOf('ask_image', { id: 'i1' }), 'ask_image')
+    assert.equal(pollingClassOf('read_file', { file_path: 'src/a.ts' }), null)
+    assert.equal(pollingClassOf('web_fetch', { url: 'https://example.com' }), null)
+  })
+
+  it('recordToolPollingClass appends classes and caps to 24', () => {
+    let store = createTraceStore()
+    for (let i = 0; i < 30; i++) {
+      store = recordToolPollingClass(store, 'job', { action: i % 2 ? 'logs' : 'list' })
+    }
+    assert.equal(store.toolPollingClasses!.length, 24)
+    assert.ok(store.toolPollingClasses!.every(c => c === 'job'))
+  })
+
+  it('getPollingStormLevel uses the same warn/storm thresholds as tool storms', () => {
+    const classes = Array(8).fill('job')
+    assert.equal(getPollingStormLevel(classes.slice(0, 3)), 'none')
+    assert.equal(getPollingStormLevel(classes.slice(0, 4)), 'warn')
+    assert.equal(getPollingStormLevel(classes), 'storm')
+  })
+
+  it('bash polling class merges command variants into one class', () => {
+    const classes = [
+      pollingClassOf('bash', { command: 'curl -s localhost:3000/status' })!,
+      pollingClassOf('bash', { command: 'curl -s http://localhost:3000/status | head -1' })!,
+      pollingClassOf('bash', { command: 'curl -s localhost:3000/status?ts=1' })!,
+    ]
+    assert.ok(classes.every(c => c === 'bash:curl'))
+  })
+
+  it('non-polling tools never enter the polling-class trajectory', () => {
+    let store = createTraceStore()
+    store = recordToolPollingClass(store, 'read_file', { file_path: 'a.ts' })
+    store = recordToolPollingClass(store, 'grep', { pattern: 'x' })
+    assert.deepEqual(store.toolPollingClasses, undefined)
   })
 })
 

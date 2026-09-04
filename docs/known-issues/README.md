@@ -8,6 +8,7 @@
 |------|--------|------|
 | [2026-08-05-desktop-scroll-stream-follow.md](2026-08-05-desktop-scroll-stream-follow.md) | 桌面端滚动 S1 修复已落地（`4c952c3a5`）；剩 S2 两候选假设的实机取证 | 代码已修，待 Windows/macOS 实机验收 |
 | [2026-08-15-desktop-scroll-timeline-collapse-tug.md](2026-08-15-desktop-scroll-timeline-collapse-tug.md) | 桌面滚动拉锯：A'/B + 对标三件 + 遗留①均已落地（遗留②症状路径 end-anchor 下已停用）；剩 Windows 真实 WebView2 两档复验 | 代码已修，待 Windows 实机验收 |
+| [2026-09-04-desktop-model-polling-flood.md](2026-09-04-desktop-model-polling-flood.md) | 主控模型成功型轮询无硬熔断：P0-1 轮询风暴 stop-reason 已落地；待排 P0-2 前端 blocks 上限 + P1 TUI 卡折叠 | 🟡 进行中（P0-1 已修） |
 
 > 桌面滚动线（两条）的共同外部依赖：Windows/macOS 实机验收，见
 > [2026-08-12-windows-session-stability-refactor.md](2026-08-12-windows-session-stability-refactor.md) 的验收待办——**代码侧无剩余工作，别再按「未修」排期**。
