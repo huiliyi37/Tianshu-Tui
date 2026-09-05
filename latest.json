@@ -14,6 +14,10 @@
     "windows-x86_64": {
       "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.13.0/Tianshu_3.13.0_x64-setup.exe",
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1dadTNMdkw4bzNpZDFPUmJ2V0lCRTU4SFNkUFVsL0JndEZtbk45ZXpvV21FMDZxRzlqRU1UUW10RnowUkhXWDdFazRBUmlub1pRR2ZQWlRHZUNRdVEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NTg1OTkzCWZpbGU6VGlhbnNodV8zLjEzLjBfeDY0LXNldHVwLmV4ZQp5cGd3dXlEbTJ5SFIrNGk5TXc5ZE13NjByMkZNcDBGTkUrTFVVL0poMkFpbUhqVkhVdVU3UzZldkRpOElzOGxidU9TTlBOSTNhVnl2QUNxSjdwVEtEdz09Cg=="
+    },
+    "linux-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.13.0/Tianshu_3.13.0_amd64.AppImage",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1ZrVkNaTTh1L3RVd1lzN1pZVDc0N0JsNkJYRUlBZVdVdlRJem1GeVBKSEU2SEY4VjV0LzRNeDJoL09DWU03M1RrVkQwenU1RnBLcGhjVXVKK3VQbWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjA3NjQxCWZpbGU6VGlhbnNodV8zLjEzLjBfYW1kNjQuQXBwSW1hZ2UKWk9hUmI5Q0Jhc2tpUDN6b1VCZ0FGMkRyTzRhc2NHU1VTc2hVZzVBRmFVcE4vWXRQWXNhY09NYWFGSVg1Q3hlbFh2QnV5S0pjTE9sTFFSRWVKdXI3Q0E9PQo="
     }
   }
 }
