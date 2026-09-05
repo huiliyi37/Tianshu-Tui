@@ -17,6 +17,8 @@
   <a href="https://tianshuharness.com"><b>🌐 官网 tianshuharness.com</b></a> · 
   🇨🇳 <b>中文</b> · 
   <a href="README.en.md">📖 English</a> · 
+  <a href="README.ja.md">🇯🇵 日本語</a> · 
+  <a href="README.ko.md">🇰🇷 한국어</a> · 
   <a href="docs/stars/genesis-stele.md">✦ 星域碑文</a> · 
   <a href="docs/user-guide.md">📚 用户手册</a> · 
   <a href="docs/user-guide-sandbox-permissions.md">🛡️ 沙箱权限</a> · 
@@ -170,6 +172,25 @@ rivet
 ```
 
 > **Windows 提示**：装完提示 `rivet 无法识别` 时——先**新开一个终端**（装 Node 时开着的窗口拿的是旧 PATH）；仍不行，把 `npm prefix -g` 输出的目录加进用户 PATH 再开新终端。官方安装器装的 Node 默认无此问题，nvm/fnm/scoop 安装的需手动加一次。
+
+**Android（Termux）**：官方支持路径是 **proot-distro（glibc 发行版）**，裸 Termux（bionic）缺少必需原生依赖（`@ast-grep/napi` / `esbuild`）的 Android 平台二进制，安装守卫会直接拦截并给出指引。
+
+```bash
+# 1. 容器准备（Termux 内）
+pkg install proot-distro && proot-distro install ubuntu && proot-distro login ubuntu
+# 2. 容器内：基础工具 + Node >= 24（nodesource 或 nvm）
+apt update && apt install -y curl ripgrep git
+# 3. 安装天枢 CLI
+npm install -g tianshu-tui
+rivet
+```
+
+> 手机端能力说明：沙箱自动降级为无沙箱（走正常审批流）、`better-sqlite3` 拿不到预编译时退化为内存库、LSP/语音等按缺失静默降级——核心对话与编码工具链完整可用。`rivet -p "..."` 无头模式同样可跑。实验性强行安装可设 `RIVET_ALLOW_MOBILE_INSTALL=1`（自担风险）。
+
+**手机端使用技巧**：
+- **回看输出**：流式期间终端会把视口拽到底部（任何新输出都会）。`Ctrl+S` 冻结输出——冻结期零写入，随便往上翻；`Ctrl+S`/`Ctrl+Q` 解冻后新内容按序补上，不丢。`/scroll` 打开全屏翻页器看最近 1000 行。源码构建用 pnpm 的用户：仓库已声明 `pnpm.onlyBuiltDependencies`，`pnpm install` 会自动放行必需原生依赖的构建脚本（老版本 pnpm 用 `pnpm approve-builds`）。
+- **字形缺字/对齐错位**：Termux 默认字体缺部分装饰字形时设 `RIVET_ASCII_UI=1` 强制 ASCII 边框；中文用户遇 `—`/`…` 撑破对齐设 `RIVET_AMBIGUOUS_WIDTH=wide`。
+- **软键盘占半屏**：终端高度 < 14 行时自动隐藏状态行与键位提示行，输入框优先。
 
 **方式 D：从源码构建**：
 
@@ -330,6 +351,7 @@ DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕�
 - **Compact 走 flash 侧路** —— 修复了压缩未配 provider 时仍走主模型的 bug，自动从主 provider 推断 flash 端点。
 - **Doom-loop 自动收束** —— 检测到重复工具调用时，动态 appendix 注入更严格的 output-style 约束，减少无谓思考 token 消耗。`RIVET_TERSE=0` 关闭。
 - **用户显式 `max` 保护** —— 在 config 中手动指定 `reasoningEffort: max` 会被视为 reasoning floor，effort 路由永不将其降级。
+- **峰谷计价提醒** —— DeepSeek 官方闲时半价（北京时间工作日 9:00–12:00 / 14:00–18:00 为峰时，其余半价）：TUI 状态栏与桌面端 Composer 各有一枚 `◷闲½` / `◷峰` 标示，tooltip 附切换倒计时；仅 DeepSeek 官方 provider 显示，零配置。
 
 ### 子智能体编排
 

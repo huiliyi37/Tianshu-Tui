@@ -10,6 +10,7 @@ import { invalidateSessionReadDedup } from '../tools/read-file.js'
 import { getTodos, getTodoRegressionStats } from '../tools/todo.js'
 import { resolveDecisionsArm } from './decisions-experiment.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
+import { collectToolCallPairing, hasOrphanToolCalls } from './tool-call-pairing.js'
 import { applyDescriptionMode } from '../tools/description-compact.js'
 import { resolvePromptBlocks } from '../prompt/block-policy.js'
 import { buildBudgetReport } from '../prompt/prefix-budget.js'
@@ -72,6 +73,7 @@ import { SessionJobs } from '../tools/job-store.js'
 import { MonitorRegistry } from './monitor-registry.js'
 import { COMPACT_HISTORY_TOOL } from '../compact/recall-marker.js'
 import { createWriteEvidenceProbe } from '../context/write-evidence-probe.js'
+import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { compactPolicyRatios } from '../compact/constants.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -1811,6 +1813,40 @@ export class AgentLoop {
     return this.persist?.getFilePath()
   }
 
+  /**
+   * 修孤儿先于冻结（2026-09-05 写工具卡死链收口）。
+   *
+   * refreshReliabilityDecision 的 integrity 维度把「持久化孤儿 tool_use」判成
+   * error → minimal 冻结写工具与 bash——而孤儿修复（buildOaiRequest 内的
+   * preflight）在同一 turn 稍后才发生。顺序反了的结果是：一次崩溃/强退留下的
+   * 孤儿让每个新会话（firedRecoveryTriggers 挂实例不跨会话）开门先冻手，且冻的
+   * 是马上就要被修好的历史。这里在决策前先跑同款 preflight + 磁盘探针，把可
+   * 愈合的孤儿修好并写回会话——决策自然看到干净状态，磁盘已确认落盘的写入
+   * 拿到真实的「写入已确认」补偿文案而非整个会话被冻结。修复失败按原样冻结
+   * （fail-closed）。返回合成的占位结果数（0 = 本来就干净）。
+   */
+  healOrphansBeforeReliabilityDecision(): number {
+    const msgs = this.session.getMessages()
+    // 廉价预扫（共享收集器 collectToolCallPairing）：没有孤儿就走快速路径，
+    // 正常会话零开销——preflight 的 normalize 会新建数组，不能每轮白跑。
+    // 口径说明：只愈合孤儿调用（call 无 result——恢复时让模型误以为工具
+    // 仍在飞，触发冻结链）。孤儿结果（result 无 call，rewind/裁剪残留）
+    // 不触发冻结，不在愈合范围——computeSessionIntegrity 只统计它。
+    if (!hasOrphanToolCalls(collectToolCallPairing(msgs))) return 0
+
+    try {
+      const report = runResumePreflightOai(msgs, { writeProbe: createWriteEvidenceProbe(this.cwd) })
+      if (report.repaired && report.syntheticResultsInserted > 0) {
+        this.session.replaceMessages(report.messages)
+        debugLog(`[orphan-heal] healed ${report.syntheticResultsInserted} orphan(s) before reliability decision`)
+        return report.syntheticResultsInserted
+      }
+    } catch {
+      // 修复失败不阻塞决策——按原样进入 reliability 判定（fail-closed）。
+    }
+    return 0
+  }
+
   refreshReliabilityDecision(): void {
     // User override: RIVET_RELIABILITY_OVERRIDE=full disables all reliability
     // locks. Use when the agent is permanently locked by a non-self-resolving
@@ -1919,38 +1955,17 @@ export class AgentLoop {
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */
   private detectPendingTools(): boolean {
-    const msgs = this.session.getMessages()
-    const pendingIds = new Set<string>()
-    for (const msg of msgs) {
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.id) pendingIds.add(tc.id)
-        }
-      }
-      if (msg.role === 'tool' && msg.tool_call_id) {
-        pendingIds.delete(msg.tool_call_id)
-      }
-    }
-    return pendingIds.size > 0
+    return hasOrphanToolCalls(collectToolCallPairing(this.session.getMessages()))
   }
 
   /** 中#5: Compute session integrity snapshot for recovery trigger. */
   private computeSessionIntegrity() {
     const msgs = this.session.getMessages()
-    const toolCallIds = new Set<string>()
-    const toolResultIds = new Set<string>()
-    for (const msg of msgs) {
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.id) toolCallIds.add(tc.id)
-        }
-      }
-      if (msg.role === 'tool' && msg.tool_call_id) {
-        toolResultIds.add(msg.tool_call_id)
-      }
-    }
+    const { toolCallIds, toolResultIds } = collectToolCallPairing(msgs)
     return {
       orphanToolUseCount: [...toolCallIds].filter(id => !toolResultIds.has(id)).length,
+      // 孤儿结果（result 无 call）：rewind/裁剪残留，不触发冻结、不在 heal
+      // 范围——这里只做统计上报。
       orphanToolResultCount: [...toolResultIds].filter(id => !toolCallIds.has(id)).length,
       wasRepaired: false,
       syntheticResultsInserted: 0,

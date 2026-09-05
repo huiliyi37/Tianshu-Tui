@@ -155,8 +155,9 @@ test('RED #6: at MAX_IMAGES cap → no addImage, warning committed', async () =>
   assert.ok(visible.includes('最多附加 4 张图片'), 'warning "最多附加 4 张图片" must be committed')
 })
 
-// ── RED: Ctrl+C 清空输入必须连同图片附件一起清（2026-08 用户反馈）──
-test('RED: Ctrl+C with only image attachments clears them (no exit hint)', async () => {
+// ── Ctrl+C 不再清空输入/图片（对齐 Claude Code：Ctrl+C 只中断回合或双击退出，
+//    草稿与附件原样保留，防止误触丢内容）。图片删除走文本空时 backspace 路径。──
+test('Ctrl+C with image attachments: keeps images, enters exit-confirm', async () => {
   const { app, stdin } = makeApp()
   app.start()
   ;(app as any).lastInputFocusAt = Date.now() - 2_000
@@ -168,11 +169,13 @@ test('RED: Ctrl+C with only image attachments clears them (no exit hint)', async
   stdin.dataHandler!('\x03') // Ctrl+C
   await tick(20)
 
-  assert.equal((app as any).getInputImagesCount(), 0, 'Ctrl+C 应清掉图片')
+  assert.equal((app as any).getInputImagesCount(), 1, 'Ctrl+C 不再清掉图片（防误触丢附件）')
   assert.equal(app.getInputValue(), '', '文本仍空')
+  const pending = (app as any).inputController.ctrlCPendingSince
+  assert.ok(pending > 0, '进入退出确认窗口')
 })
 
-test('RED: Ctrl+C with text+images clears both and shows restore hint', async () => {
+test('Ctrl+C with text+images: keeps both, shows exit-confirm hint (no restore hint)', async () => {
   const { app, out, stdin } = makeApp()
   app.start()
   ;(app as any).lastInputFocusAt = Date.now() - 2_000
@@ -182,7 +185,8 @@ test('RED: Ctrl+C with text+images clears both and shows restore hint', async ()
   stdin.dataHandler!('\x03') // Ctrl+C
   await tick(20)
 
-  assert.equal(app.getInputValue(), '', '文本被清')
-  assert.equal((app as any).getInputImagesCount(), 0, '图片被清')
-  assert.ok(out.chunks.join('').includes('Ctrl+Z to restore'), '清空提示告知恢复途径')
+  assert.equal(app.getInputValue(), 'hi', '文本保留，不被清空')
+  assert.equal((app as any).getInputImagesCount(), 1, '图片保留')
+  assert.ok(!out.chunks.join('').includes('Ctrl+Z to restore'), '无清空恢复提示（不再清空）')
+  assert.ok(out.chunks.join('').includes('再次按 Ctrl+C 退出'), '显示退出确认提示')
 })

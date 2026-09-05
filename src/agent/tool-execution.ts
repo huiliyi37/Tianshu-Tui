@@ -45,6 +45,41 @@ import { createRuntimeHookContext } from './runtime-hooks.js'
 import { toolTargetFromInput } from './tool-target.js'
 import { sanitizeToolOutput } from '../tools/output-sanitizer.js'
 
+/**
+ * 收尾链界定（2026-09-05 写工具卡死链收口）：批内所有「工具执行完成之后」的
+ * await——tiering / runPostTool 钩子 / 视觉桥描述——此前全部无界，任何一个楔死
+ * 都让 executeBatch 永不 settle，UI 静默假死，用户杀进程即产生持久化孤儿。
+ * bounded 超时后用 fallback 值放行（resolve 而非 reject——界定的是收尾优化，
+ * 超时不能打断批），原 promise 继续在后台跑，其结果被丢弃。ms ≤ 0 = 不界定。
+ */
+function boundMs(envName: string, fallback: number): number {
+  const raw = process.env[envName]
+  if (raw != null && raw.trim() !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return fallback
+}
+
+async function bounded<T>(label: string, ms: number, p: Promise<T>, fallback: () => T): Promise<T> {
+  if (!(ms > 0)) return p
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => {
+          // eslint-disable-next-line no-console
+          console.error(`[tool-batch] ${label} exceeded ${ms}ms — proceeding with fallback (original still running in background)`)
+          resolve(fallback())
+        }, ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export interface ToolExecutionDeps {
   config: AgentConfig
   cwd: string
@@ -328,17 +363,22 @@ export class ToolExecutionController {
   async executeBatch(input: ToolExecBatchInput): Promise<ToolExecBatchResult> {
     const outputSanitizeEnabled = process.env.RIVET_OUTPUT_SANITIZE !== '0'
     this.deps.beginToolBatchObservability?.(outputSanitizeEnabled)
-    try {
-      const callbacks: AgentCallbacks = this.deps.recordToolUiEvent
-      ? {
-          ...input.callbacks,
-          onToolResult: (...args) => {
-            this.deps.recordToolUiEvent?.()
-            input.callbacks.onToolResult(...args)
-          },
-        }
-      : input.callbacks
+    // 崩溃安全网（2026-09-05 写工具卡死链收口）：toolResults 与 committed 必须
+    // 活过 try 边界——管线的任何一处 throw（预算/tiering/storm/视觉桥…）都不得
+    // 把「已执行完工具的结果」一起带进孤儿窗口。finally 里 !committed 时补齐
+    // backfill 并落账，保证短进程死亡之外的任何异常路径都不会产生持久化孤儿。
     const toolResults: ContentBlock[] = []
+    let committed = false
+    try {
+    const callbacks: AgentCallbacks = this.deps.recordToolUiEvent
+    ? {
+        ...input.callbacks,
+        onToolResult: (...args) => {
+          this.deps.recordToolUiEvent?.()
+          input.callbacks.onToolResult(...args)
+        },
+      }
+    : input.callbacks
     let checkpointCreatedThisTurn = input.checkpointCreatedThisTurn
     let traceStore = input.traceStore
     let importGraph = input.importGraph
@@ -570,13 +610,17 @@ export class ToolExecutionController {
         // original, and saving a second (already budget-truncated) copy both
         // wastes disk and shadows the better artifact.
         const existingArtifactId = extractTrailingArtifactId(content)
-        const tiered = await tierToolResult(
-          toolName,
-          content,
-          String(target),
-          this.deps.artifactStore,
-          ctxWin,
-          existingArtifactId,
+        const tiered = await bounded(
+          'tierToolResult', boundMs('RIVET_TIER_BOUND_MS', 10_000),
+          tierToolResult(
+            toolName,
+            content,
+            String(target),
+            this.deps.artifactStore,
+            ctxWin,
+            existingArtifactId,
+          ),
+          () => ({ content, tier: 0, originalChars: content.length }),
         )
         if (tiered.tier > 0) {
           toolResults[i] = { ...tr, content: tiered.content }
@@ -657,6 +701,9 @@ export class ToolExecutionController {
       }
     }
     this.deps.addToolResults(toolResults)
+    // 提交后即使后续（视觉桥/runPostTool/会话状态）抛错，finally 安全网也不再
+    // 重复落账——历史已平衡，异常只影响批的返回路径。
+    committed = true
 
     // Vision channel: forward tool-carried screenshots to the model as a
     // TRAILING user message (append-only after the tool results — same
@@ -694,7 +741,11 @@ export class ToolExecutionController {
         // tool results are already valid without the description.
         let description: string | null = null
         try {
-          description = await this.deps.describeToolImages(images, input.abortSignal)
+          description = await bounded(
+            'describeToolImages', boundMs('RIVET_VISION_DESCRIBE_BOUND_MS', 20_000),
+            this.deps.describeToolImages(images, input.abortSignal),
+            () => null,
+          )
         } catch { /* bridge unavailable — fall through to text-only results */ }
         if (description) {
           this.deps.addUserMessageWithImages?.(
@@ -724,7 +775,11 @@ export class ToolExecutionController {
         || typeof tu.input?.path === 'string'
         || typeof tu.input?.command === 'string'
       const target = hasTargetField ? toolTargetFromInput(tu.name, tu.input as Record<string, unknown>) : undefined
-      await this.deps.runtimeHooks.runPostTool(
+      // runPostTool 在 addToolResults 之后（结果已落账），楔死在这里不再产孤儿
+      // 但会让批永不 settle → UI 假死。同样界定。
+      await bounded(
+        'runPostTool', boundMs('RIVET_POSTTOOL_BOUND_MS', 15_000),
+        this.deps.runtimeHooks.runPostTool(
         createRuntimeHookContext(
           this.deps.buildRuntimeSnapshot(),
           {
@@ -767,6 +822,8 @@ export class ToolExecutionController {
               ).class
             : undefined,
        },
+        ),
+        () => undefined,
       )
    }
 
@@ -810,6 +867,40 @@ export class ToolExecutionController {
       return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined, toolCount: input.toolUses.length, errorCount }
     } finally {
       this.deps.endToolBatchObservability?.()
+      // 崩溃安全网：正常路径在上方 addToolResults 处落账并置 committed；走到
+      // 这里 !committed 意味着管线中途 throw（预算/tiering/storm/视觉桥等）——
+      // 把已收集的结果原样落账并补齐缺失的 backfill，绝不把「工具已执行完」的
+      // 结果留在孤儿窗口里。历史内容未经批末变换（预算裁剪/tiering），是可接受
+      // 的降级——比孤儿（下一会话冻写工具）便宜得多。自身再失败则只能放弃。
+      if (!committed) {
+        try {
+          const committedIds = new Set(
+            toolResults.filter(r => r.type === 'tool_result').map(r => r.tool_use_id),
+          )
+          for (const tu of input.toolUses) {
+            if (committedIds.has(tu.id)) continue
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: tu.id,
+              content: input.abortSignal.aborted
+                ? '[aborted] Tool execution was interrupted before this call completed.'
+                : '[skipped] Tool produced no result.',
+              is_error: true,
+            })
+          }
+          if (toolResults.length > 0) {
+            this.deps.addToolResults(toolResults)
+            this.deps.writeTelemetry?.({
+              kind: 'tool-batch-crash-commit',
+              turn: input.turn,
+              committed: toolResults.length,
+              toolUses: input.toolUses.length,
+            })
+          }
+        } catch {
+          // 终极兜底失败——只能放弃，交给加载侧的 preflight 修复。
+        }
+      }
     }
  }
 }

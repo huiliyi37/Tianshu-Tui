@@ -127,6 +127,50 @@ test('run persists images as ids and keeps base64 out of the event log', () => {
   assert.deepEqual(got!.bytes, Buffer.from(PNG_1PX_B64, 'base64'))
 })
 
+// ---- POST /sessions create-with-images (welcome page / new-session dialog paste) ----
+
+test('POST /sessions with images starts the first run with images visible', async () => {
+  const persistence = new MemoryImagePersistence()
+  const { manager, agents, router } = setup(persistence)
+  const res = await router('POST', '/sessions', { prompt: 'look at this', images: [PNG_DATA_URL] }, AUTH)
+  assert.equal(res.status, 201)
+  const rec = res.body as { id: string }
+
+  // The first run received the inline data URL (same pipeline as /prompt images).
+  assert.deepEqual(agents[0]!.runImages[0], [PNG_DATA_URL])
+
+  // Event log carries imageIds + imageCount, not base64; image readable by id.
+  const userEv = manager.getEvents(rec.id, 0)!.events.find((e) => e.type === 'user')!
+  assert.equal(userEv.data.imageCount, 1)
+  const imgId = (userEv.data.imageIds as string[])[0]!
+  assert.ok(manager.readImage(rec.id, imgId))
+})
+
+test('POST /sessions without prompt ignores images (no run started)', async () => {
+  const { agents, router } = setup(new MemoryImagePersistence())
+  const res = await router('POST', '/sessions', { images: [PNG_DATA_URL] }, AUTH)
+  assert.equal(res.status, 201)
+  assert.equal(agents.length, 0, 'no agent run without a prompt')
+})
+
+test('POST /sessions rejects invalid images payloads', async () => {
+  const { router } = setup(new MemoryImagePersistence())
+
+  const empty = await router('POST', '/sessions', { prompt: 'x', images: [] }, AUTH)
+  assert.equal(empty.status, 400)
+
+  const bmp = await router('POST', '/sessions', { prompt: 'x', images: ['data:image/bmp;base64,QQ=='] }, AUTH)
+  assert.equal(bmp.status, 400)
+
+  const five = Array.from({ length: 5 }, () => PNG_DATA_URL)
+  const tooMany = await router('POST', '/sessions', { prompt: 'x', images: five }, AUTH)
+  assert.equal(tooMany.status, 400)
+
+  const huge = 'data:image/png;base64,' + 'A'.repeat(2_200_000)
+  const oversized = await router('POST', '/sessions', { prompt: 'x', images: [huge] }, AUTH)
+  assert.equal(oversized.status, 400)
+})
+
 // ---- POST /prompt validation (format allowlist + size + count) ----
 
 async function createIdle(router: ReturnType<typeof setup>['router']): Promise<string> {

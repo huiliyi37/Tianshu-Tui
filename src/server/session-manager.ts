@@ -498,6 +498,9 @@ export interface CreateSessionInput {
   cwd?: string
   title?: string
   prompt?: string
+  /** 新建即携带的图片附件（dataUrl 数组）——首轮 run 经 run(id, prompt, images)
+   *  进 persistImages + agent.run，与会话内 /prompt 粘图同管线。 */
+  images?: string[]
   /** P1 — 显式指定关联的 Mission id。不传则按 title 自动 getOrCreate。 */
   missionId?: string
   approvalMode?: ApprovalMode
@@ -1189,7 +1192,12 @@ export class RuntimeSessionManager {
     this.maxEvents = opts.maxEvents
       ?? (Number.isFinite(envMaxEvents) && envMaxEvents >= 100 ? Math.floor(envMaxEvents) : 5000)
     this.maxLoadedSessions = opts.maxLoadedSessions ?? 16
-    this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
+    // 审批等待超时：0（默认）= 永不超时——审批卡持久化可回放，无限等优于长
+    // 自主任务被误拒；部署侧（无人值守/CI）可用 RIVET_APPROVAL_TIMEOUT_MS
+    // 给一个 fail-closed 上限，超时按拒绝收口而不是永久挂起。
+    const envApprovalTimeout = Number(process.env.RIVET_APPROVAL_TIMEOUT_MS)
+    this.approvalTimeoutMs = opts.approvalTimeoutMs
+      ?? (Number.isFinite(envApprovalTimeout) && envApprovalTimeout >= 0 ? envApprovalTimeout : 0)
     this.watchdogContinueDelayMs = opts.watchdogContinueDelayMs ?? 5_000
     this.goalPlanAutoApproveMs = opts.goalPlanAutoApproveMs ?? 150_000
     this.persistence = opts.persistence
@@ -1347,6 +1355,12 @@ export class RuntimeSessionManager {
           skillLoadErrors: [],
           reasoningEffort: rec.reasoningEffort as import('../agent/auto-reasoning.js').ReasoningEffort | 'auto' | undefined,
           planAutoApproveUi: rec.planAutoApproveUi === true,
+          // 档位回读（2026-09-05 跨盘审批链修复）：顶层 approvalMode 是
+          // ensureAgent 构建代理时消费的字段——漏掉它，sidecar 重启后所有会话
+          // 的 per-session 档位静默丢失，agent 退回启动快照的全局档（默认
+          // auto-safe），而 UI 按 record.approvalMode 显示「完全读写」。用户
+          // 看到的是「全盘读写不生效 + 跨盘写永远等不到审批」。
+          approvalMode: rec.approvalMode,
         }
         this.sessions.set(session.record.id, session)
         if (wasRunning) {
@@ -2219,7 +2233,7 @@ export class RuntimeSessionManager {
     // attributed and reaped on crash. Best-effort: registry may be disabled.
     try { this.getRegistry?.()?.register(id, cwd, 'standalone') } catch { /* non-fatal */ }
     if (input.prompt && input.prompt.trim()) {
-      this.run(id, input.prompt)
+      this.run(id, input.prompt, input.images)
     }
     return { ...session.record }
   }
@@ -2617,6 +2631,9 @@ export class RuntimeSessionManager {
     this.ensureJobs(session)
     // Model affinity: a rehydrated session must come back on the model its
     // record carries (prefix-cache lives per model) — not the default model.
+    // 档位：per-session override（含 rehydrate 回读，见下方 approvalMode）优先；
+    // 无 override 时用 serve 传入的快照档——PUT /config/approval 的广播回调
+    // 会就地更新该快照并对存活 agent 广播（2026-09-05 跨盘审批链修复）。
     const created = this.createAgent(
       session.record.cwd,
       session.record.id,
@@ -3055,6 +3072,28 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     return true
+  }
+
+  /**
+   * 全局档位变更的实时广播（2026-09-05 跨盘审批链修复）。PUT /config/approval
+   * 只写磁盘时，已构建的 agent 永远拿着 sidecar 启动快照档位——UI 显示新档、
+   * agent 按旧档询问。对**没有 per-session override** 的存活 agent 实时套用
+   * 新档（有 override 的会话尊重用户会话级选择；尚未构建的 agent 由
+   * ensureAgent 的磁盘新鲜值兜底）。沙箱 env 联动由 PUT 路由侧统一处理，
+   * 此处不重复。返回实际套用的会话数（遥测/测试用）。
+   */
+  applyGlobalApprovalMode(mode: ApprovalMode): number {
+    let applied = 0
+    for (const session of this.sessions.values()) {
+      if (session.approvalMode) continue
+      if (!session.agent) continue
+      try {
+        session.agent.setApprovalMode?.(mode)
+        applied++
+      } catch { /* non-fatal — 单会话失败不阻塞广播 */ }
+    }
+    try { applySandboxPolicyForApprovalMode(mode) } catch { /* non-fatal */ }
+    return applied
   }
 
   /**
@@ -5595,6 +5634,10 @@ export class RuntimeSessionManager {
    * 窗口内用户任何参与（approve/reject/edit/prompt/steer/abort/显式路由）即取消。
    */
   private maybeArmPlanAutoApprove(session: InternalSession, slug: string): void {
+    // 计划提交的审批是**人工确认门**：即使完全读写档（skip）也等用户批准——
+    // 零打扰承诺不跨越计划门（2026-09-05 产品决定，撤销过的一版 skip 立即
+    // 自动批准）。goal 模式的倒计时自动批准保持原语义（goal 激活 + 倒计时
+    // UI + goalPlanAutoApproveMs；0 = 关闭，纯手动审批）。
     const delayMs = this.goalPlanAutoApproveMs
     if (delayMs <= 0) return
     if (!this.isGoalActive(session)) return

@@ -112,6 +112,29 @@ function decodedBase64Bytes(dataUrl: string): number {
   return Math.floor((b64.length * 3) / 4) - padding
 }
 
+/** Validate an images payload: array of provider-safe base64 data URLs. Defense in
+ *  depth — the desktop already compresses + transcodes, but the server is the
+ *  trust boundary (formats the model can't consume, oversized payloads).
+ *  Shared by POST /sessions (create-with-images) and POST /sessions/:id/prompt. */
+function validateImagesPayload(value: unknown): { images?: string[]; error?: string } {
+  if (value === undefined) return {}
+  if (!Array.isArray(value) || value.length === 0) {
+    return { error: '"images" must be a non-empty array' }
+  }
+  if (value.length > MAX_IMAGES) {
+    return { error: `Max ${MAX_IMAGES} images allowed` }
+  }
+  for (const img of value) {
+    if (typeof img !== 'string' || !ACCEPTED_IMAGE_DATA_URL.test(img)) {
+      return { error: 'Each image must be a data:image/(png|jpeg|webp|gif);base64 URL' }
+    }
+    if (decodedBase64Bytes(img) > MAX_IMAGE_BYTES) {
+      return { error: `Each image must be <= ${Math.round(MAX_IMAGE_BYTES / 1024)}KB` }
+    }
+  }
+  return { images: value as string[] }
+}
+
 /** S — accepted autonomy levels for per-session approval-mode overrides. */
 const APPROVAL_MODES: ReadonlySet<ApprovalMode> = new Set<ApprovalMode>([
   'auto-accept', 'auto-safe', 'manual', 'dangerously-skip-permissions',
@@ -242,14 +265,20 @@ export function buildSessionRoutes(
       // from SSE/stream issues. See docs/dev/render-debug-playbook.md.
       const __dbg = process.env.RIVET_DEBUG_RENDER === '1'
       const __t0 = __dbg ? Date.now() : 0
-      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; missionId?: string; approvalMode?: unknown; isolatedWorktree?: unknown; model?: string; domain?: string; planAutoApproveUi?: unknown }
+      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; missionId?: string; approvalMode?: unknown; isolatedWorktree?: unknown; model?: string; domain?: string; planAutoApproveUi?: unknown; images?: unknown }
       if (data.approvalMode !== undefined && !isApprovalMode(data.approvalMode)) {
         return { status: 400, body: { error: 'Invalid "approvalMode"' } }
+      }
+      // 新建即携带图片（欢迎页/新建对话框粘图）——与 /prompt 同一份校验。
+      const imagesCheck = validateImagesPayload(data.images)
+      if (imagesCheck.error) {
+        return { status: 400, body: { error: imagesCheck.error } }
       }
       const rec = manager.createSession({
         cwd: data.cwd,
         title: data.title,
         prompt: data.prompt,
+        images: imagesCheck.images,
         // P1 — 显式关联已有 Mission（桌面端「同任务再开一个会话」）。
         missionId: typeof data.missionId === 'string' && data.missionId.trim() ? data.missionId : undefined,
         approvalMode: data.approvalMode as ApprovalMode | undefined,
@@ -747,27 +776,13 @@ export function buildSessionRoutes(
       if (!data.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
       }
-      // Validate images: array of provider-safe base64 data URLs. Defense in
-      // depth — the desktop already compresses + transcodes, but the server is
-      // the trust boundary (formats the model can't consume, oversized payloads).
-      let images: string[] | undefined
-      if (data.images !== undefined) {
-        if (!Array.isArray(data.images) || data.images.length === 0) {
-          return { status: 400, body: { error: '"images" must be a non-empty array' } }
-        }
-        if (data.images.length > MAX_IMAGES) {
-          return { status: 400, body: { error: `Max ${MAX_IMAGES} images allowed` } }
-        }
-        for (const img of data.images) {
-          if (typeof img !== 'string' || !ACCEPTED_IMAGE_DATA_URL.test(img)) {
-            return { status: 400, body: { error: 'Each image must be a data:image/(png|jpeg|webp|gif);base64 URL' } }
-          }
-          if (decodedBase64Bytes(img) > MAX_IMAGE_BYTES) {
-            return { status: 400, body: { error: `Each image must be <= ${Math.round(MAX_IMAGE_BYTES / 1024)}KB` } }
-          }
-        }
-        images = data.images as string[]
+      // Validate images: array of provider-safe base64 data URLs (shared helper,
+      // same rules as POST /sessions create-with-images).
+      const imagesCheck = validateImagesPayload(data.images)
+      if (imagesCheck.error) {
+        return { status: 400, body: { error: imagesCheck.error } }
       }
+      const images = imagesCheck.images
 
       // Validate documents: array of { name, dataUrl } for office/pdf files.
       // Server extracts text via doc-extract (pdftotext/textutil/soffice/exceljs)

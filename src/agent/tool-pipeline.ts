@@ -10,7 +10,7 @@ import type { ImportGraph } from './import-graph.js'
 import { mkdir, appendFile } from 'node:fs/promises'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
-import { grantPath, isReadGranted } from '../tools/path-grants.js'
+import { grantPath } from '../tools/path-grants.js'
 import { expandHome } from '../platform.js'
 import { dirname, join, resolve as resolvePath, isAbsolute } from 'node:path'
 import { getSessionDir } from './session-persist.js'
@@ -1196,9 +1196,9 @@ export async function executeToolUse(
     // a persistent out-of-workspace write grant.
     if (skipAllApproval && pathGrantNeed) {
       for (const p of pathGrantNeed.paths) {
-        if (pathGrantNeed.mode === 'write' && isReadGranted(p)) {
-          grantPath(dirname(p), 'write')
-        }
+        // 完全读写档：零审批打扰——出界路径首触即授（会话级）。旧行为要求
+        // 先读过才升级，未读先写要多花一轮 request_path_access 自愈。
+        grantPath(dirname(p), pathGrantNeed.mode)
       }
     }
 
@@ -1427,7 +1427,7 @@ export async function executeToolUse(
           : toolAbort.signal
         // Zen 相位下未注册工具（幻觉调用）不晋升，但把 registry 的裸
         // Unknown tool 报错变成可行动的 zen_unlock 指引，避免死路重试。
-        const execution = deps.config.toolRegistry.execute(tu.name, { ...params, abortSignal: composedSignal })
+        const execution = deps.config.toolRegistry.execute(tu.name, { ...params, approvalMode, abortSignal: composedSignal })
         const zenGuardedExecution = execution.catch(err => {
           const zenHint = deps.getZenUnregisteredHint?.(tu.name)
           if (zenHint) {

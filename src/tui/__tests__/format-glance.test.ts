@@ -220,6 +220,39 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
   })
 })
 
+describe('DeepSeek 计价时段段（pricingPhase，W1）', () => {
+  it('full 档：offpeak 显示 ◷闲时半价，peak 显示 ◷峰时', () => {
+    const offpeak = stripAnsi(formatGlanceRight({ width: 120, pricingPhase: 'offpeak' }, theme))
+    assert.ok(offpeak.includes('◷闲时半价'), `offpeak full: ${offpeak}`)
+    const peak = stripAnsi(formatGlanceRight({ width: 120, pricingPhase: 'peak' }, theme))
+    assert.ok(peak.includes('◷峰时'), `peak full: ${peak}`)
+  })
+
+  it('compact 档：◷闲½ / ◷峰 短文案', () => {
+    const offpeak = stripAnsi(formatGlanceRight({ width: 120, density: 'compact', pricingPhase: 'offpeak' }, theme))
+    assert.ok(offpeak.includes('◷闲½'), `offpeak compact: ${offpeak}`)
+    const peak = stripAnsi(formatGlanceRight({ width: 120, density: 'compact', pricingPhase: 'peak' }, theme))
+    assert.ok(peak.includes('◷峰'), `peak compact: ${peak}`)
+    assert.ok(!peak.includes('◷峰时'), `compact 不用 full 文案: ${peak}`)
+  })
+
+  it('缺省（非 deepseek）不渲染计价段', () => {
+    const plain = stripAnsi(formatGlanceRight({ width: 120 }, theme))
+    assert.ok(!plain.includes('◷'), `undefined 不渲染: ${plain}`)
+    const compact = stripAnsi(formatGlanceRight({ width: 120, density: 'compact' }, theme))
+    assert.ok(!compact.includes('◷'), `compact undefined 不渲染: ${compact}`)
+  })
+
+  it('着色：闲时 success、峰时 muted', () => {
+    // 强制 hex theme（test 环境默认回退命名色无 truecolor SGR），与 token 阈值色测试同款
+    const hexTheme = { ...theme, success: '#6fbf73', muted: '#8a919e' }
+    const offpeak = formatGlanceRight({ width: 120, pricingPhase: 'offpeak' }, hexTheme)
+    assert.ok(offpeak.includes('38;2;111;191;115'), 'offpeak → success(#6fbf73)')
+    const peak = formatGlanceRight({ width: 120, pricingPhase: 'peak' }, hexTheme)
+    assert.ok(peak.includes('38;2;138;145;158'), 'peak → muted(#8a919e)')
+  })
+})
+
 describe('formatPermissionModeLine（输入框下方权限模式行，CC parity）', () => {
   it('默认 auto-safe，含 shift+tab 提示', () => {
     const plain = stripAnsi(formatPermissionModeLine({}, theme))

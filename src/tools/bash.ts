@@ -872,6 +872,20 @@ async function executeBashOnce(params: ToolCallParams): Promise<BashExecResult> 
   })
 }
 
+/** 沙箱拒绝后的「首触即授 + 重跑一次」判定（导出供单测）：
+ *  - RIVET_SANDBOX=learn：教学采集模式（toolchain profile 从实证填充）；
+ *  - 全自动档（dangerously-skip-permissions）：零打扰承诺——出界写当场授予
+ *    会话级授权并重跑，不再「拒绝 → 模型恢复轮」（2026-09-05 用户反馈）。
+ * 无拒绝路径时恒 false。重跑的非幂等副作用风险由调用方在结果里声明。 */
+export function shouldAutoGrantSandboxDenial(
+  sandboxEnv: string | undefined,
+  approvalMode: string | undefined,
+  hasDenialPaths: boolean,
+): boolean {
+  if (!hasDenialPaths) return false
+  return sandboxEnv === 'learn' || approvalMode === 'dangerously-skip-permissions'
+}
+
 export const BASH_TOOL: Tool = {
   definition: {
     name: 'bash',
@@ -892,29 +906,29 @@ export const BASH_TOOL: Tool = {
   async execute(params: ToolCallParams) {
     const first = await executeBashOnce(params)
 
-    // learn mode: a boundary denial should teach, not block. Grant the refused
-    // path for this session, retry ONCE, and log the observation so the
+    // learn mode / 全自动档：a boundary denial should teach, not block. Grant the
+    // refused path for this session, retry ONCE, and log the observation so the
     // toolchain profile (sandbox-toolchain.ts) is filled from evidence rather
     // than guesswork.
     //
-    // NOT for production. The command prefix that ran before the denial runs a
-    // second time — non-idempotent work (network POSTs, appends, migrations)
-    // duplicates. Bounded to: learn mode only, at most one retry, and the
-    // duplication is declared in the result.
-    if (
-      process.env.RIVET_SANDBOX !== 'learn'
-      || !first.sandboxDenial
-      || first.sandboxDenial.paths.length === 0
-    ) {
+    // 两条触发线：RIVET_SANDBOX=learn（教学采集模式）或 skip 档（全自动的
+    // 零打扰承诺——出界写首触即授，2026-09-05 用户反馈「全自动动不动被拦」）。
+    // 注意非幂等副作用：被拒前已执行的前缀会跑第二遍（网络 POST/追加/迁移
+    // 会重复）——最多重跑一次，且重复在结果里声明。敏感文件硬墙与 deny 规则
+    // 在上游（validatePath / approval-risk）不受影响。
+    const skipTier = params.approvalMode === 'dangerously-skip-permissions'
+    const denial = first.sandboxDenial
+    if (!denial || denial.paths.length === 0) return first
+    if (!shouldAutoGrantSandboxDenial(process.env.RIVET_SANDBOX, params.approvalMode, true)) {
       return first
     }
 
-    for (const p of first.sandboxDenial.paths) grantPath(p, 'write')
+    for (const p of denial.paths) grantPath(p, 'write')
     recordSandboxLearn({
       cwd: params.cwd,
       command: String(params.input.command ?? ''),
-      backend: first.sandboxDenial.backend,
-      deniedPaths: first.sandboxDenial.paths,
+      backend: denial.backend,
+      deniedPaths: denial.paths,
       retried: true,
     }, rivetHome())
 
@@ -922,8 +936,9 @@ export const BASH_TOOL: Tool = {
     // defaultWritableRoots is recomputed per wrap, so the grants just recorded
     // are already in the new profile.
     const second = await executeBashOnce(params)
+    const tag = skipTier ? 'sandbox 首触即授' : 'sandbox learn'
     const banner =
-      `[sandbox learn] 首次执行被写边界拒绝，已临时授权 ${first.sandboxDenial.paths.join(', ')} 并重跑一次。` +
+      `[${tag}] 首次执行被写边界拒绝，已临时授权 ${denial.paths.join(', ')} 并重跑一次。` +
       `注意：首次执行在被拒之前产生的副作用可能已重复发生。\n\n`
     return { ...second, content: banner + second.content }
   },

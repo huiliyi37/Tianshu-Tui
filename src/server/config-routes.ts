@@ -163,7 +163,15 @@ export interface ProviderListItem {
   slowThinking?: boolean
 }
 
-export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandler> {
+export function buildConfigRoutes(
+  apiToken?: string,
+  hooks?: {
+    /** 全局审批档位落盘后的实时广播（2026-09-05 跨盘审批链修复）：更新启动
+     *  快照 + 对无 per-session override 的存活 agent 套用新档，否则 UI 显示
+     *  「完全读写」而 agent 仍按启动旧档询问。 */
+    onApprovalConfigChanged?: (approval: string) => void
+  },
+): Record<string, RouteHandler> {
   return {
     // project-trust 授权路由子模块（见 config-routes-project-trust.ts）
     ...buildProjectTrustRoutes(apiToken),
@@ -677,6 +685,10 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         // 重新置 1）。undefined = 不动该维度。
         if (unsandboxed === true) process.env.RIVET_SANDBOX = '0'
         else if (unsandboxed === false) delete process.env.RIVET_SANDBOX
+        // 实时广播给快照与存活 agent（无 hook 的调用方——测试/CLI——行为不变）
+        if (hooks?.onApprovalConfigChanged && snapshot.approval) {
+          try { hooks.onApprovalConfigChanged(snapshot.approval) } catch { /* 广播失败不影响落盘结果 */ }
+        }
         return { status: 200, body: { ok: true, ...snapshot } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
@@ -832,7 +844,8 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         // grants for every live session). Removals cannot be revoked from the
         // in-memory store — the same root may also hold an approval-time grant —
         // so a removed entry stays effective until the next sidecar start.
-        applyConfiguredPathGrants(next)
+        // force：用户刚保存的路径必须当场实测（新挂载的盘不能被 TTL 记忆挡住）。
+        applyConfiguredPathGrants(next, { force: true })
         const removed = [
           ...before.additionalReadDirs.filter(d => !next.additionalReadDirs.includes(d)),
           ...before.additionalWriteDirs.filter(d => !next.additionalWriteDirs.includes(d)),

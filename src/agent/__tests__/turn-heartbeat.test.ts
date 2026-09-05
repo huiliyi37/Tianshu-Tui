@@ -375,3 +375,52 @@ describe('TurnHeartbeat', () => {
     })
   })
 })
+
+describe('TurnHeartbeat armBatchDeadline（批级硬限）', () => {
+  it('整批超过硬限触发一次 onHardStall', async () => {
+    const stalls: number[] = []
+    const hb = new TurnHeartbeat({
+      silentMs: 10_000,
+      hardStallMs: 60_000,
+      onHeartbeat: () => {},
+      onHardStall: (ms) => stalls.push(ms),
+    })
+    hb.start()
+    hb.armBatchDeadline(40)
+    await delay(250)
+    hb.stop()
+    assert.equal(stalls.length, 1, `expected exactly 1 hard-stall, got ${stalls.length}`)
+    assert.equal(stalls[0], 40)
+  })
+
+  it('rearmWatchdog 清掉未到期的批硬限（合法批提前结束不再误触）', async () => {
+    const stalls: number[] = []
+    const hb = new TurnHeartbeat({
+      silentMs: 10_000,
+      hardStallMs: 60_000,
+      onHeartbeat: () => {},
+      onHardStall: (ms) => stalls.push(ms),
+    })
+    hb.start()
+    hb.armBatchDeadline(40)
+    hb.rearmWatchdog()
+    await delay(250)
+    hb.stop()
+    assert.equal(stalls.length, 0)
+  })
+
+  it('0 关闭批硬限（回到完全 disarm 的旧行为）', async () => {
+    const stalls: number[] = []
+    const hb = new TurnHeartbeat({
+      silentMs: 10_000,
+      hardStallMs: 60_000,
+      onHeartbeat: () => {},
+      onHardStall: (ms) => stalls.push(ms),
+    })
+    hb.start()
+    hb.armBatchDeadline(0)
+    await delay(250)
+    hb.stop()
+    assert.equal(stalls.length, 0)
+  })
+})

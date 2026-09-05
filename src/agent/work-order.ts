@@ -285,7 +285,11 @@ export const workerResultSchema = z.object({
    * Why the worker failed — enables recovery-strategy differentiation.
    *
    * status × failureReason 消费矩阵（2026-08-25 收口）：
-   * - caller_aborted → status 'blocked'：父会话主动取消，消费方不得重试、不得按完成态展示。
+   * - caller_aborted → status 'blocked'：父会话主动取消，消费方不得重试。
+   *   例外（2026-09-05 completed-aborted）：abort 收尾时产物已按 scope 声明
+   *   落盘的，coordinator 升级为 status 'passed' + deliveredOnAbort:true
+   *   （证据钉死 unverified）——failureReason 保留 caller_aborted/timeout
+   *   供下游区分「被 abort 杀掉的已交付」与「干净通过」。见 upgradeAbortedDelivery。
    * - timeout / max_turns → 预算耗尽：可续跑信号（hands-session 内部先续跑，
    *   放弃后才对外；消费方见二者不应自动再续）。
    * - worker_blocked → 环境/闸门阻断：环境中性，不计能力惩罚。
@@ -339,6 +343,14 @@ export const workerResultSchema = z.object({
   /** M2 时间账：worker 从进全局并发门到 settle 的墙钟（含等槽排队），由
    *  coordinator 在 settle 后补账——非 worker 自报字段，不进 ingest schema。 */
   durationMs: z.number().optional(),
+  /** completed-aborted 语义（2026-09-05 team-76dc14a1 事故修复）：worker 被
+   *  abort（父信号/预算超时）斩杀时，其 scope 声明的产物已按预期写盘——
+   *  coordinator 按 fs 事实（存在 + 非空 + 本次运行有新写入）把它从
+   *  blocked/failed 升级为 passed，并用本字段盖章。证据链被 abort 切断
+   *  （没跑验证），evidenceStatus 恒为 unverified。
+   *  刻意不进 ingest schema（同 objective/groupId 纪律）——worker 无法自报
+   *  此标记绕过 verifyWorkerEvidence 的未验证改动闸门。 */
+  deliveredOnAbort: z.boolean().optional(),
 })
 
 const workerResultIngestSchema = z.object({

@@ -61,6 +61,7 @@ import { formatAskUserQuestion } from '../format/ask-user-question.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
+import { formatCollapsedPollingGroup, formatCollapsedPollingGroupLive, isPollingFoldTool } from '../format/collapsed-polling.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
@@ -82,7 +83,7 @@ import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet, formatWorkerFleetSettled } from '../format/worker-fleet.js'
 import { formatWorkerDispatchCard } from '../format/worker-dispatch-card.js'
-import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
+import { decodeTeamPanelModel, overlayFleetStatus, stripTeamPanelFrames, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import { decodeCouncilPanel, COUNCIL_PANEL_UI_PREFIX, type CouncilPanelModel } from '../council-panel-model.js'
 import { formatCouncilPanel } from '../format/council-panel.js'
 import { ActivityStore, formatActivityBand, formatJobsBar } from '../activity-store.js'
@@ -369,6 +370,8 @@ export interface TuiMetrics {
   cacheHitRate: number | null
   /** 缓存健康度状态（来自 projectCacheTelemetry 三态判定） */
   cacheStatus?: CacheStatus
+  /** DeepSeek 计价时段（仅 provider 为 deepseek 官方时给出；其他 provider 缺省不显示） */
+  pricingPhase?: 'peak' | 'offpeak'
   /** 会话累计费用（美元，单次从 getTotalUsage 计算，不累加） */
   cost: number
   /** 会话累计 input / output token（仅用于展示，不参与 += 累加） */
@@ -407,6 +410,14 @@ export class TuiApp {
   private cprProbeTimer: ReturnType<typeof setInterval> | null = null
   /** TUI 存活期 stderr 护栏（游离 stderr 文本走 commit 通道，防污染 live region）。 */
   private outputGuard: OutputGuard | null = null
+  /**
+   * 输出冻结（Ctrl+S 切换，Ctrl+Q 解冻别名）——触摸终端（Termux 等）上滚动
+   * 回看读的是终端自身 scrollback，任何光标寻址输出（spinner tick、空闲 CPR
+   * 探针、流式帧）都会把视口拽回底部。冻结期间 stdout **零写入**：ticker 停、
+   * live 不重绘、主屏 commit 进 mainCommitQueue 排队、探针静默——数据照常
+   * 缓冲，解冻后 requestPump + flushNow 按序补放，零丢失。
+   */
+  private outputFrozen = false
 
   /**
    * 读屏档：停掉 120ms ticker 并丢弃 live region 的动态段。
@@ -1031,7 +1042,7 @@ export class TuiApp {
       // 确认窗口内粘贴 = 继续对话：取消 pending-exit 再插入文本
       // （与打字路径的取消同一状态位，见 handleKey 的 Normal input processing）。
       if (this.inputController.ctrlCPendingSince > 0) {
-        this.inputController.ctrlCPendingSince = 0
+        this.inputController.clearExitConfirm()
         this.renderLive()
       }
 
@@ -1185,32 +1196,28 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_c') {
         if (this.isAgentActive()) {
-          // Agent active (含首 token 前/纯工具窗口): abort current agent run
+          // Agent active: abort current agent run。对齐 Claude Code——运行中
+          // Ctrl+C 只作 interrupt 被吞掉，绝不落入双击退出。
           this.handleAbort()
-        } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value.trim() && this.inputLine.images.length === 0) {
-          // Second Ctrl+C within window → exit（有输入/附件时不退出——窗口内
-          // 打过字或贴过图说明用户在继续对话，退化为清空输入，见下方分支）
-          this.inputController.ctrlCPendingSince = 0
+        } else if (this.inputController.ctrlCPendingSince > 0) {
+          // 窗口内二次 Ctrl+C → 退出（期间 Esc/编辑键/粘贴/提交已取消 pending，
+          // 与输入框有无内容无关——Claude Code 双击退出语义）。
+          this.inputController.clearExitConfirm()
           this.dispose()
           if (this.onExitCallback) {
             this.onExitCallback()
           } else {
             process.exit(0)
           }
-        } else if (this.inputLine.value.trim() || this.inputLine.images.length > 0) {
-          // Idle with input (text or image attachments): clear everything,
-          // don't exit。同时取消可能残留的确认窗口——清空输入后提示行没有
-          // 理由继续显示。图片附件必须一并清（2026-08 用户反馈：Ctrl+C
-          // 清不掉图片）；clearAll 记单个 undo 单元，Ctrl+Z 可整体恢复。
-          this.inputLine.clearAll()
-          this.inputController.ctrlCPendingSince = 0
-          this.inputController.clearedHintUntil = Date.now() + 2000
-          this.renderLive()
         } else {
-          // Idle with empty input: first Ctrl+C → show hint, start 2s window
-          this.inputController.ctrlCPendingSince = Date.now()
+          // 空闲首按（有无内容都如此）：只进退出确认窗口，内容原样保留。对齐
+          // Claude Code：Ctrl+C 从不清空（清空是 idle Esc 职责）；owned timer
+          // 防重入窗口被旧定时器截断，Esc/编辑/粘贴/提交经 clearExitConfirm 清理。
+          const ic = this.inputController
+          if (ic.ctrlCExitTimer !== null) clearTimeout(ic.ctrlCExitTimer)
+          ic.ctrlCPendingSince = Date.now()
+          ic.ctrlCExitTimer = setTimeout(() => { ic.ctrlCPendingSince = 0; ic.ctrlCExitTimer = null }, 2000)
           this.renderLive()
-          setTimeout(() => { this.inputController.ctrlCPendingSince = 0 }, 2000)
         }
         return
       }
@@ -1259,7 +1266,7 @@ export class TuiApp {
         // 被隐藏），用户此刻按 Esc 的意图是「回到对话」。overlay 激活时的 Esc
         // 已在上方 handleOverlayKey 消费（先关 overlay），不会走到这里。
         if (this.inputController.ctrlCPendingSince > 0) {
-          this.inputController.ctrlCPendingSince = 0
+          this.inputController.clearExitConfirm()
           // 取消用的 Esc 不计入双击 rewind 计时，避免「取消后立刻双击 Esc」
           // 误开 rewind overlay。
           this.inputController.lastEscAt = 0
@@ -1328,6 +1335,16 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_o') {
         this.expandLastTruncatedTool()
+        return
+      }
+      // 输出冻结（Ctrl+S）/ 解冻（Ctrl+Q 别名）——触摸终端滚动回看的根治：
+      // 冻结期 stdout 零写入，终端视口停在用户翻到的位置，解冻后按序补放。
+      if (key.name === 'ctrl_s') {
+        this.setOutputFrozen(!this.outputFrozen)
+        return
+      }
+      if (key.name === 'ctrl_q') {
+        if (this.outputFrozen) this.setOutputFrozen(false)
         return
       }
       if (key.name === 'ctrl_t') {
@@ -1436,7 +1453,7 @@ export class TuiApp {
       // 确认窗口内的任何编辑键 = 用户继续对话：取消 pending-exit，恢复输入框。
       // 否则字符进 value 但输入框仍被隐藏（幽灵输入），Enter 还会提交不可见内容。
       if (this.inputController.ctrlCPendingSince > 0) {
-        this.inputController.ctrlCPendingSince = 0
+        this.inputController.clearExitConfirm()
         this.renderLive()
       }
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta, key.shift)
@@ -1598,6 +1615,8 @@ export class TuiApp {
 
   /** 输入提交主流程（InputLine onSubmit 回调；原构造器闭包提取，逻辑零改动）。 */
   private async handleInputSubmit(text: string, images?: string[]): Promise<void> {
+    // 提交 = 继续对话：取消 Ctrl+C 退出确认（同 Esc/编辑键/粘贴，防残留误退）。
+    if (this.inputController.ctrlCPendingSince > 0) this.inputController.clearExitConfirm()
     // 入口先规范化图片数组，后续气泡/渲染/回调看到的是同一份。
     images = normalizeSubmitImages(images)
     let trimmed = text.trim()
@@ -4497,6 +4516,30 @@ export class TuiApp {
    * rejection）。前方存在 async barrier（带图 prepare）时后续条目严格
    * FIFO 延后，哪怕它本身是同步闭包也绝不越过。
    */
+  /**
+   * 冻结/解冻输出。冻结瞬间先经 fast path 同步写一行 ⏸ 标记进 scrollback
+   * （此时 outputFrozen 仍为 false），随后置位——此后到解冻为止 stdout 零
+   * 写入；解冻时按序补放队列并重绘 live。
+   */
+  private setOutputFrozen(frozen: boolean): void {
+    if (this.outputFrozen === frozen) return
+    if (frozen) {
+      this.enqueueMainCommit(() => {
+        this.stdout.write(color('⏸ 输出已冻结（Ctrl+S 恢复）——期间的新内容会在解冻后补上\n', this.theme.warning))
+      })
+      this.outputFrozen = true
+      this.live.suppressProbe()
+      this.updateTicker()
+      return
+    }
+    this.outputFrozen = false
+    this.live.resumeProbe()
+    this.updateTicker()
+    this.requestPump()
+    this.writeBatcher.flushNow()
+    this.renderLive()
+  }
+
   private enqueueMainCommit(ready: (() => void) | Promise<() => void>): Promise<boolean> | null {
     if (
       typeof ready === 'function'
@@ -4504,6 +4547,7 @@ export class TuiApp {
       && this.mainCommitPump === null
       && !this.mainCommitPumping
       && !this.overlay.isActive()
+      && !this.outputFrozen
     ) {
       try {
         this.atomicCommitNow(ready)
@@ -4574,7 +4618,8 @@ export class TuiApp {
         continue
       }
       // await 期间 overlay 可能（重）激活——主屏内容绝不可写进 alt screen。
-      if (this.overlay.isActive()) return
+      // 输出冻结期同理：主屏写入排队，解冻后由 requestPump 续排。
+      if (this.overlay.isActive() || this.outputFrozen) return
       this.mainCommitQueue.shift()
       let written = true
       try {
@@ -4606,6 +4651,8 @@ export class TuiApp {
    * 表示写入是否成功。
    */
   private commitUserPrompt(content: string, images?: string[]): Promise<boolean> | null {
+    // 用户消息打断轮询连击：聚合卡先于气泡落版（打断即落版）
+    if (this.toolGroupController.isActivePollingGroup()) this.flushPollingGroup()
     const protocol = imageProtocol()
     const withImages = images && images.length > 0 && protocol !== 'none'
     if (!withImages) {
@@ -4696,7 +4743,8 @@ export class TuiApp {
   /** streaming/thinking/analyzing/waiting 时启动 120ms ticker，idle 停止 */
   private updateTicker(): void {
     // 读屏档没有动态段可刷，ticker 只会白白触发重绘判定。
-    const active = this.state.phase !== 'idle' && !this.screenReader
+    // 输出冻结期同理——spinner tick 是触摸终端「视口被拽回底部」的元凶之一。
+    const active = this.state.phase !== 'idle' && !this.screenReader && !this.outputFrozen
     if (active && !this.streamRenderController.ticker) {
       this.streamRenderController.ticker = setInterval(() => {
         this.streamRenderController.tick++
@@ -5136,6 +5184,8 @@ export class TuiApp {
     this.state.isStreaming = true
     this.setPhase('streaming')
     this.markActivity()
+    // assistant 文本打断轮询连击：先 flush 聚合卡，让它落在文本之前（打断即落版）
+    if (this.toolGroupController.isActivePollingGroup()) this.flushPollingGroup()
     // Push through block writer (buffers text, emits in display-sized blocks)
     const stableCommitGeneration = this.stableStreamCommitGeneration
     this.blockWriter.push(text)
@@ -5170,9 +5220,22 @@ export class TuiApp {
     // 主面板星域位会让用户误以为 /domain 切了域（还牵连缓存语义），且顺带改变了
     // 输入框边框的星域 persona separator。会话星域显示恒随 /domain 设定。
 
-    // 工具折叠组：read/search 与可折叠 bash 各走各的 buffer，互相打断。
-    // non-collapsible（含变更型 bash）到达时 flush 两个组。
-    if (isCollapsibleTool(name)) {
+    // 工具折叠组：read/search、可折叠 bash、轮询连击各走各的 buffer，互相打断。
+    // non-collapsible（含变更型 bash）到达时 flush 三个组。
+    // 轮询连击（known-issue 2026-09-04 P1）：折叠集工具同名连续调用聚合成一张卡；
+    // 异名工具（含另一个轮询工具）打断。同名但本轮已有 thinking 待提交时同样先
+    // flush——thinking 落版属非工具内容，插进时间线即视为打断连击。
+    if (
+      this.toolGroupController.isActivePollingGroup()
+      && (!isPollingFoldTool(name) || this.toolGroupController.pollingShouldBreak(name) || !!this.state.thinkingText)
+    ) {
+      this.flushPollingGroup()
+    }
+    if (isPollingFoldTool(name)) {
+      if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+      if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
+      this.toolGroupController.pushPollingUse(id, name, input)
+    } else if (isCollapsibleTool(name)) {
       if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
       this.toolGroupController.pushUse(id, name, input)
     } else if (name === 'bash' && isCollapsibleBashCommand(input.command as string)) {
@@ -5206,6 +5269,51 @@ export class TuiApp {
     const group = this.toolGroupController.flushBashGroup()
     if (!group || group.entries.length === 0) return
     const formatted = formatCollapsedBashGroup({ group, theme: this.theme })
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
+  }
+
+  /**
+   * 将轮询连击 buffer 刷新到 scrollback。
+   *
+   * 退化策略（非连击场景零形态变化）：
+   * - ×1 已完成：按普通工具卡渲染（单次 job(await) 等不变成「聚合卡 ×1」），
+   *   截断判定与 Ctrl+O 单卡通道同普通终态卡。
+   * - 全部在途：不落卡——结果到达后走 handleToolResult 的迟到重开路径自成新组。
+   * - ≥2 条：聚合卡一行摘要 + 最近调用明细。
+   */
+  private flushPollingGroup(): void {
+    const group = this.toolGroupController.flushPollingGroup()
+    if (!group || group.entries.length === 0) return
+    if (group.entries.length === 1 && group.entries[0]!.completed) {
+      const e = group.entries[0]!
+      const cardInput = {
+        toolName: e.toolName,
+        content: e.content ?? '',
+        isError: e.isError,
+        toolInput: e.input,
+        ...(e.endMs !== undefined ? { elapsedMs: e.endMs - e.startMs } : {}),
+      }
+      if (isToolCardTruncated(cardInput)) {
+        this.toolGroupController.setLastTruncatedTool({
+          toolName: e.toolName,
+          content: e.content ?? '',
+          isError: e.isError ?? false,
+          toolInput: e.input,
+        })
+      }
+      const formatted = formatToolCard(cardInput, this.theme)
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
+    }
+    // 全在途：无结果可摘要，跳过落卡（迟到 result 会重开新组）
+    if (!group.entries.some(e => e.completed)) return
+    const formatted = formatCollapsedPollingGroup({ group, theme: this.theme, columns: this.columns })
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
@@ -5404,19 +5512,24 @@ export class TuiApp {
     if (isError === undefined) {
       debugLog(`[tool-result-trace] tui id=${id} → STREAMING chunk (not committing to scrollback)`)
       // team_orchestrate fleet viz: the orchestrator streams an initial encoded
-      // TeamPanel (all-waiting DAG) before dispatch. Intercept it into liveTeamModel
-      // and DO NOT accumulate — otherwise it would double-decode at terminal
-      // (indexOf would hit this stale panel before the real one) and leak the raw
-      // encoded string into the live tool tail.
+      // TeamPanel (all-waiting DAG) before dispatch. Intercept it into liveTeamModel;
+      // the frame itself is stripped from the text stream (never accumulated) so it
+      // can't double-decode at terminal (indexOf would hit this stale panel before
+      // the real one) nor leak the raw encoded string into the live tool tail.
+      // 同 chunk 混入的进度文本（帧之外的行）仍进累加器作 tail——对齐桌面端
+      // event-reducer 的 decodeTeamPanel + stripTeamPanelFrames 分工。
       if (name === 'team_orchestrate' && result.includes(TEAM_PANEL_UI_PREFIX)) {
         const model = decodeTeamPanelModel(result)
         if (model) {
           this.liveTeamModel = model
           this.commitTeamWaveTransitions(model)
-          this.markActivity()
-          this.writeBatcher.schedule()
-          return
         }
+        // decode 失败（撕裂/非法帧）同样剥离帧行：raw 帧永不进 tail / 终态拼接。
+        const rest = stripTeamPanelFrames(result)
+        if (rest.trim()) this.toolGroupController.accumulate(id, rest)
+        this.markActivity()
+        this.writeBatcher.schedule()
+        return
       }
       // council_convene live viz: intercept encoded CouncilPanel frames (skeleton
       // + progress updates) into liveCouncilModel. Same pattern as team_orchestrate:
@@ -5485,6 +5598,23 @@ export class TuiApp {
       }
       this.toolGroupController.attachResult(id, finalContent, isError)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
+      this.writeBatcher.flushNow()
+      return
+    }
+
+    // 轮询折叠集（job/monitor/browser_debug/browser/computer_use/ask_image）：
+    // 结果绑进连击组，聚合卡延迟到 flush 时渲染（不逐次 commit 终态卡）。
+    if (isPollingFoldTool(name)) {
+      // 迟到的异名 result（打断时仍在途的那次调用）视作打断：先 flush 当前连击，
+      // 再自成新组——不丢弃也不混入别组。
+      const activePolling = this.toolGroupController.getActivePollingGroup()
+      if (activePolling && activePolling.toolName !== name) this.flushPollingGroup()
+      // G4 同口径：buffer 已被 flush（文本/异族/回合结束打断），迟到 result 自动开新组
+      if (!this.toolGroupController.isActivePollingGroup()) {
+        this.toolGroupController.pushPollingUse(id, name, meta?.input ?? {})
+      }
+      this.toolGroupController.attachPollingResult(id, finalContent, isError)
+      // 不单独 commit — 将在 flushPollingGroup 时聚合渲染
       this.writeBatcher.flushNow()
       return
     }
@@ -5620,6 +5750,33 @@ export class TuiApp {
       })
       return
     }
+    // 轮询连击聚合卡：连击里每次调用的明细（input 标签 + 结果摘要）逐条列出，
+    // 超过 POLLING_EXPAND_MAX_ENTRIES 的部分计数折叠（详见 format 层）。
+    const collapsedPolling = this.toolGroupController.getLastCollapsedPollingGroup()
+    if (collapsedPolling) {
+      const g = collapsedPolling
+      this.toolGroupController.clearLastCollapsedPollingGroup()
+      const formatted = formatCollapsedPollingGroup({ group: g, expanded: true, theme: this.theme, columns: this.columns })
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
+    }
+    // live 中的活跃轮询连击：flush 并展开提交（与 read/search 组同口径）。
+    // flushPollingGroup 会写入 lastCollapsedPollingGroup——立即清掉防重复展开。
+    if (this.toolGroupController.isActivePollingGroup()) {
+      const g = this.toolGroupController.flushPollingGroup()
+      if (g && g.entries.length > 0) {
+        this.toolGroupController.clearLastCollapsedPollingGroup()
+        const formatted = formatCollapsedPollingGroup({ group: g, expanded: true, theme: this.theme, columns: this.columns })
+        this.commitAbove(() => {
+          this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+          this.state.committedCount++
+        })
+        return
+      }
+    }
     // 回退：展开单个截断工具卡片
     const t = this.toolGroupController.getLastTruncatedTool()
     if (!t) return
@@ -5660,6 +5817,10 @@ export class TuiApp {
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
+    // 轮询连击只在回合结束（run 终态）落版：中间轮边界（isFinal=false）刻意
+    // 不打断——跨轮静默连击正是折叠目标（100× job(list) → 1 张聚合卡），逐轮
+    // flush 会退化成每轮一张 ×1 卡。打断语义见 handleToolUse/handleTextDelta。
+    if (isFinal && this.toolGroupController.isActivePollingGroup()) this.flushPollingGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -5773,6 +5934,7 @@ export class TuiApp {
     // 与 abort 同口径 flush 折叠组，避免错误后孤儿结果滞留组内无法提交。
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
+    if (this.toolGroupController.isActivePollingGroup()) this.flushPollingGroup()
     // 与 abort 同口径回收 run 本地状态：provider 在工具/委派回合中报错走 onError，
     // 此时 pendingTools/toolAccumulator 可能持有半成品数据。只清 fleet 而漏清这两者，
     // 下一轮会读到上轮孤儿条目（live 区显示已死工具卡片、累加器跨 run 污染）。
@@ -5963,6 +6125,7 @@ export class TuiApp {
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
+    if (this.toolGroupController.isActivePollingGroup()) this.flushPollingGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
@@ -6186,7 +6349,12 @@ export class TuiApp {
     const welcomeIdle = this.state.phase === 'idle' && this.state.turnNumber === 0
     const slashOverlay = this.inputController.slashMenu.open || this.inputLine.value.startsWith('/')
     if (welcomeIdle && this.liveRowsHighWater === 0 && !slashOverlay) return 0
-    const cap = liveMaxRowsFor(this.rows || 24)
+    // 矮屏（<24 行，手机软键盘展开的典型形态）把高水位预留压到半屏——整屏
+    // 空白比输入框弹跳更伤；常规桌面高度维持原 cap（28 行封顶）不变。
+    const rows = this.rows || 24
+    const cap = rows < 24
+      ? Math.min(liveMaxRowsFor(rows), Math.ceil(rows / 2))
+      : liveMaxRowsFor(rows)
     const total = dynamicRows + chromeRows
     this.liveRowsHighWater = Math.min(cap, Math.max(this.liveRowsHighWater, total))
     return Math.max(0, this.liveRowsHighWater - chromeRows)
@@ -6271,6 +6439,9 @@ export class TuiApp {
       this.deferredCommitRender = true
       return
     }
+    // 输出冻结期：live region 任何重绘都是光标寻址写入，会把触摸终端的
+    // scrollback 视口拽回底部。数据照常缓冲，解冻后统一重绘。
+    if (this.outputFrozen) return
     // start() 之前所有 setter / 用户输入回调都不应触发真正的 stdout 输出。
     // 构造后到 main.ts 清屏写欢迎屏之间若渲染一版输入框，旧帧可能残留在
     // 欢迎屏上方形成重影；统一在 start() 置 started=true 后才开始绘制。
@@ -6332,6 +6503,7 @@ export class TuiApp {
     let glanceEstimatedTokens: number | undefined
     let glanceConversationTokens: number | undefined
     let glanceMaxTokens: number | undefined
+    let glancePricingPhase: 'peak' | 'offpeak' | undefined
     if (metrics) {
       glanceCacheHitRate = metrics.cacheHitRate ?? undefined
       glanceCacheStatus = metrics.cacheStatus
@@ -6340,6 +6512,7 @@ export class TuiApp {
       glanceEstimatedTokens = metrics.estimatedTokens
       glanceConversationTokens = metrics.conversationTokens
       glanceMaxTokens = metrics.maxTokens
+      glancePricingPhase = metrics.pricingPhase
     } else {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
       glanceContextRatio = this.metricsGlanceController.lastContextRatio
@@ -6549,6 +6722,18 @@ export class TuiApp {
       }
     }
 
+    // 2c-ter. 轮询连击聚合行（job/monitor/browser_debug 等同名连击一行聚合，
+    // 每次调用/结果更新该活行而不是新增卡片——轮询刷屏的 live 侧收口）
+    if (this.toolGroupController.isActivePollingGroup()) {
+      const activePolling = this.toolGroupController.getActivePollingGroup()
+      if (activePolling && activePolling.entries.length > 0) {
+        const groupLines = formatCollapsedPollingGroupLive(activePolling, this.theme, cols)
+        for (const line of groupLines) {
+          lines.push({ text: line })
+        }
+      }
+    }
+
     // 2d. 进行中非 collapsible 工具。
     //
     // 只有最新一张卡展开末 3 行输出，其余压成单标题行，并整体封顶——每张卡
@@ -6562,6 +6747,8 @@ export class TuiApp {
         if (isCollapsibleTool(meta.name)) continue
         // 跳过已归入 bash 折叠组的 bash 工具
         if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
+        // 跳过已归入轮询连击组的折叠集工具（它们在 2c-ter 聚合行中显示）
+        if (isPollingFoldTool(meta.name) && this.toolGroupController.hasPollingEntry(id)) continue
         visible.push([id, meta])
       }
       const overflow = Math.max(0, visible.length - LIVE_TOOL_CARD_MAX)
@@ -6588,7 +6775,24 @@ export class TuiApp {
       }
     }
 
-    } // ← 主视图动态段结束（1b–2d；与上方 worker 视图分支对应）
+    // 2e. team_orchestrate 在跑：紧凑 TeamPanel 实时卡（帧解码的 DAG 运行态，
+    //     叠加 fleet 的 per-worker 实况）。等待期唯一的结构化进度面——任务数 /
+    //     波次 / 各任务状态一目了然；chrome 段活动带 by design 只列 running，
+    //     全 waiting 的派发前窗口与无活动 worker 只有这里可见。无帧时（plan_task）
+    //     由 2d 卡片的进度行尾兜底。宽屏侧栏已承载 team 段，主区不重复。
+    if (this.liveTeamModel && !showSidePanel) {
+      const teamLines = formatTeamPanel(
+        this.teamModelWithLiveStatus(this.liveTeamModel),
+        this.theme,
+        cols,
+        { compact: true },
+      )
+      for (const line of teamLines) {
+        lines.push({ text: this.clampLine(line) })
+      }
+    }
+
+    } // ← 主视图动态段结束（1b–2e；与上方 worker 视图分支对应）
 
     // 3. Approval prompt (when pending)
     //
@@ -6734,11 +6938,13 @@ export class TuiApp {
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     // 渲染防御：输入框有内容时永远显示输入框——提示行只在空输入时取代它，
     // 兜住一切未取消 pending 的漏网路径（粘贴竞态等），杜绝幽灵输入。
-    if (this.inputController.clearedHintUntil > Date.now() && !this.inputLine.value && this.inputLine.images.length === 0) {
-      lines.push({ text: '(input cleared · Ctrl+Z to restore · Ctrl+C again to exit)' })
-    } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value && this.inputLine.images.length === 0) {
-      lines.push({ text: '(Ctrl+C again to exit)' })
-    } else {
+    // 5. Input line / Ctrl+C 退出确认提示（对齐 Claude Code）：提示行叠加在
+    // 输入框上方，输入框与内容始终渲染——不存在「输入框消失」的困惑。
+    if (this.inputController.ctrlCPendingSince > 0) {
+      lines.push({ text: color('再次按 Ctrl+C 退出 · Esc 或输入即取消', this.theme.muted) })
+      lines.push({ text: '' })
+    }
+    { // 输入框渲染（原 else 主体；提示行在场时与其并存）
       const inputVal = this.inputLine.value
       const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, this.getCommandPredicate(), this.getCommandPrefixPredicate())
       const isStreaming = this.state.phase !== 'idle'
@@ -6783,6 +6989,7 @@ export class TuiApp {
         reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
         cacheStatus: glanceCacheStatus,
+        pricingPhase: glancePricingPhase,
         estimatedTokens: glanceEstimatedTokens,
         conversationTokens: glanceConversationTokens,
         maxTokens: glanceMaxTokens,
@@ -6915,6 +7122,10 @@ export class TuiApp {
       }
 
       // ── 辅助行（状态/metrics/提示）全部在输入框上方 ──────────────
+      // 矮屏降级（<14 行——手机软键盘展开的典型形态）：状态行与键位 footer
+      // 让位给输入框本体，保证帧高不超屏（applyRowBudget 的「宁可超行」在
+      // 矮屏上就是重影/错位）。信息可经命令随时找回，垂直空间优先。
+      const shortScreen = (this.rows || 24) < 14
       // 5a. 图片附件摘要（输入框上方、状态行上方）
       const imageCount = this.inputLine.images.length
       if (imageCount > 0) {
@@ -6924,12 +7135,15 @@ export class TuiApp {
 
       // 5b. 状态行：左 metrics（模型/effort/cache/ctx/耗时）+ 右权限模式（右对齐）——
       //     顶框不再承载指标，收敛到输入框上方这一行（权限行仍是单一事实来源）。
-      //     slash 提示打开时权限让位；整行放不下时权限独占下一行。
+      //     slash 提示打开时权限让位；整行放不下时权限独占下一行。矮屏整块让位。
       const permLine = formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive, askMode: askModeActive }, this.theme)
       const permTrim = permLine.trimStart()
       const metricsW = displayWidth(rightStr, { ambiguousAsWide: true })
       const permW = displayWidth(permTrim, { ambiguousAsWide: true })
-      if (!isSlash) {
+      if (shortScreen) {
+        // 矮屏：只保留权限提示的核心片段（审批/计划态），压成一行
+        if (planModeActive || askModeActive) lines.push({ text: this.clampLine(permTrim) })
+      } else if (!isSlash) {
         const pad = cols - 1 - 2 - metricsW - permW
         if (metricsW > 0 && pad >= 2) {
           lines.push({ text: `  ${rightStr}${' '.repeat(pad)}${permTrim}` })
@@ -7041,13 +7255,15 @@ export class TuiApp {
 
       // prompt footer：输入框下方键位提示行（对齐公开仓）——换行模式/打断/
       // 审批态提示。审批态的 JSON 编辑分支在 renderLive 更早处 return，不重叠。
-      const footerLines = formatPromptFooter({
-        width: cols,
-        newlineMode: this.inputLine.newlineMode,
-        agentBusy: this.agentBusy && !this.isAgentRunSettling(),
-        approvalPending: this.approvalIntentController.approvalPending != null,
-      }, this.theme)
-      for (const line of footerLines) lines.push({ text: this.clampLine(line) })
+      if (!shortScreen) {
+        const footerLines = formatPromptFooter({
+          width: cols,
+          newlineMode: this.inputLine.newlineMode,
+          agentBusy: this.agentBusy && !this.isAgentRunSettling(),
+          approvalPending: this.approvalIntentController.approvalPending != null,
+        }, this.theme)
+        for (const line of footerLines) lines.push({ text: this.clampLine(line) })
+      }
     }
 
     if (this.screenReader) {
@@ -7080,6 +7296,8 @@ export class TuiApp {
         for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
           if (isCollapsibleTool(meta.name)) continue
           if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
+          // 轮询折叠集工具在 2c-ter 聚合行显示，不再占侧栏 currentTool 位
+          if (isPollingFoldTool(meta.name) && this.toolGroupController.hasPollingEntry(id)) continue
           return { name: meta.name, elapsedMs: Date.now() - meta.startMs }
         }
         return undefined

@@ -795,3 +795,59 @@ test('stats() reports session and running counts', async () => {
   assert.equal(mgr.stats().sessionCount, 2)
   assert.ok(s.id)
 })
+
+// ── 2026-09-05 跨盘审批链：rehydrate 档位回读 + 全局档位广播 ──────────
+
+test('rehydrate 回读 per-session approvalMode——重启后 agent 不退回全局档', async () => {
+  const built: Array<{ sessionId?: string; approvalMode?: string }> = []
+  const mgr = new RuntimeSessionManager({
+    createAgent: (_cwd, sessionId, approvalMode) => {
+      built.push({ sessionId, approvalMode })
+      return new NoopAgent()
+    },
+    persistence: new LazyMemoryPersistence([{
+      record: {
+        id: 'fullrw', status: 'completed', createdAt: 1, updatedAt: 3,
+        cwd: '/work', lastSeq: 1, pendingApprovals: 0,
+        approvalMode: 'dangerously-skip-permissions',
+      },
+      events: [ev(1, 'status', { status: 'completed' })],
+    }]),
+  })
+
+  // UI 侧看到的档位（record 回读）
+  assert.equal(mgr.getSession('fullrw')!.approvalMode, 'dangerously-skip-permissions')
+  // agent 构建时拿到的档位——修复前此处为 undefined（顶层字段缺失），
+  // agent 退回启动快照的全局档，「完全读写」静默失效
+  mgr.run('fullrw', 'go')
+  assert.equal(built.length, 1)
+  assert.equal(built[0]!.approvalMode, 'dangerously-skip-permissions')
+})
+
+class MutableAgent extends NoopAgent {
+  liveMode: string | undefined
+  setApprovalMode(mode: string): void { this.liveMode = mode }
+}
+
+test('applyGlobalApprovalMode 只广播无 override 的存活 agent，返回套用数', async () => {
+  const built: MutableAgent[] = []
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => {
+      const a = new MutableAgent()
+      built.push(a)
+      return a
+    },
+    defaultCwd: '/work',
+  })
+  const withOverride = mgr.createSession({ prompt: 'go', approvalMode: 'manual' })
+  const noOverride = mgr.createSession({ prompt: 'go' })
+  mgr.createSession({}) // idle：未构建 agent，广播应跳过
+  // createSession({prompt}) 自动开跑并构建 agent——两个 agent 此时已 built
+  assert.equal(built.length, 2)
+  const [overrideAgent, plainAgent] = built
+
+  const applied = mgr.applyGlobalApprovalMode('dangerously-skip-permissions')
+  assert.equal(applied, 1, '只有无 override 且已构建的 agent 被套用')
+  assert.equal(plainAgent!.liveMode, 'dangerously-skip-permissions')
+  assert.equal(overrideAgent!.liveMode, undefined, '会话级 override 尊重用户选择，不被全局广播覆盖')
+})

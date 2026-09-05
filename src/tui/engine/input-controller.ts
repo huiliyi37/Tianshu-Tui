@@ -42,8 +42,18 @@ export class InputController {
   inputHistory: string[] = []
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   ctrlCPendingSince = 0
-  /** Ctrl+C 清空输入后的恢复提示截止时间 (ms)——渲染层显示 "Ctrl+Z to restore"。 */
-  clearedHintUntil = 0
+  /** 退出确认的自动取消定时器句柄——取消/退出时必须 clearTimeout，
+   *  否则残留的旧定时器会提前截断重入后的新确认窗口（定时器残留竞态）。 */
+  ctrlCExitTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** 复位退出确认并清理其自动取消定时器（Esc/编辑键/粘贴/提交/退出共用收口）。 */
+  clearExitConfirm(): void {
+    this.ctrlCPendingSince = 0
+    if (this.ctrlCExitTimer !== null) {
+      clearTimeout(this.ctrlCExitTimer)
+      this.ctrlCExitTimer = null
+    }
+  }
   /** ESC double-press: last ESC timestamp (ms), 0 = inactive */
   lastEscAt = 0
 

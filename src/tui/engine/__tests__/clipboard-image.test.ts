@@ -97,26 +97,24 @@ test('RED #4: tryShellClipboard returns null when no shell tools available', asy
   assert.equal(result, null)
 })
 
-test('RED #5: tryShellClipboard on macOS returns image when osascript succeeds', async () => {
+test('RED #5: macOS 单次 osascript 嵌套 coercion（PNGf 命中）→ PNG dataUrl', async () => {
   const mod = await import('../clipboard-image.js')
   const { tryShellClipboard } = mod
 
   const pngBuf = Buffer.from(PNG_B64, 'base64')
+  const osascriptCalls: string[][] = []
   const execFile = async (bin: string, args: string[]) => {
-    const arg0 = args[0] ?? ''
-    const arg1 = args[1] ?? ''
-    if (bin === 'osascript' && arg0 === '-e' && arg1.includes('clipboard info')) {
-      // 模拟 osascript 返回 class PNG 信息
-      return { stdout: '«class PNG»' }
-    }
-    if (bin === 'osascript' && arg0 === '-e' && arg1.includes('write')) {
-      // 模拟写入临时文件——实际由 readFile 读回
-      return { stdout: '' }
+    if (bin === 'osascript') {
+      osascriptCalls.push(args)
+      // 嵌套 try 脚本：PNGf 命中后回显类名
+      return { stdout: 'PNGf' }
     }
     throw new Error(`unexpected exec: ${bin} ${args.join(' ')}`)
   }
-
-  const readFile = async (_p: string) => pngBuf
+  const readFile = async (p: string) => {
+    assert.ok(p.endsWith('.png'), `expected .png temp path, got ${p}`)
+    return pngBuf
+  }
 
   const result = await tryShellClipboard({
     execFile,
@@ -129,4 +127,99 @@ test('RED #5: tryShellClipboard on macOS returns image when osascript succeeds',
   assert.ok(result!.dataUrl.startsWith('data:image/png;base64,'))
   assert.equal(result!.mime, 'image/png')
   assert.equal(result!.source, 'png')
+  // 契约：clipboard info + write 两次 spawn 合并为一次嵌套脚本
+  assert.equal(osascriptCalls.length, 1, 'macOS 读图应只 spawn 一次 osascript')
+  const script = osascriptCalls[0]?.[1] ?? ''
+  assert.ok(script.includes('PNGf'), '脚本应含 PNGf coercion（«class PNG» 是语法错误，不能用）')
+})
+
+test('RED #6: JPEG picture 剪贴板（clipboard info 文本判定漏掉的类型）→ JPEG dataUrl', async () => {
+  const mod = await import('../clipboard-image.js')
+  const { tryShellClipboard } = mod
+
+  // 真实 JPEG 文件头（FF D8 FF E0 ... JFIF）
+  const jpegBuf = Buffer.from('ffd8ffe000104a46494600010100004800480000', 'hex')
+  const execFile = async (bin: string, args: string[]) => {
+    if (bin === 'osascript') {
+      // PNGf/TIFF coercion 失败后 JPEG 命中
+      return { stdout: 'JPEG' }
+    }
+    throw new Error(`unexpected exec: ${bin} ${args.join(' ')}`)
+  }
+  const readFile = async (p: string) => {
+    assert.ok(p.endsWith('.jpg'), `expected .jpg temp path, got ${p}`)
+    return jpegBuf
+  }
+
+  const result = await tryShellClipboard({
+    execFile,
+    platform: 'darwin',
+    readFile,
+    tmpdir: '/tmp',
+    randomUUID: () => 'test-uuid',
+  } as any)
+  assert.ok(result, 'expected JPEG read to succeed (browser-copied images advertise JPEG picture)')
+  assert.ok(result!.dataUrl.startsWith('data:image/jpeg;base64,'))
+  assert.equal(result!.mime, 'image/jpeg')
+  assert.equal(result!.source, 'jpeg')
+})
+
+test('RED #7: 剪贴板无图 → osascript 回显 none → null 且不读文件', async () => {
+  const mod = await import('../clipboard-image.js')
+  const { tryShellClipboard } = mod
+
+  const readFileCalls: string[] = []
+  const execFile = async (bin: string, _args: string[]) => {
+    if (bin === 'osascript') return { stdout: 'none' }
+    throw new Error(`unexpected exec: ${bin}`)
+  }
+  const readFile = async (p: string) => {
+    readFileCalls.push(p)
+    throw new Error('no temp file should be read when clipboard has no image')
+  }
+
+  const result = await tryShellClipboard({
+    execFile,
+    platform: 'darwin',
+    readFile,
+    tmpdir: '/tmp',
+    randomUUID: () => 'test-uuid',
+  } as any)
+  assert.equal(result, null)
+  assert.equal(readFileCalls.length, 0, 'none 回显时不应读任何临时文件')
+})
+
+test('RED #8: TIFF 剪贴板 → 单次读回后经 sips 转 PNG', async () => {
+  const mod = await import('../clipboard-image.js')
+  const { tryShellClipboard } = mod
+
+  const pngBuf = Buffer.from(PNG_B64, 'base64')
+  // TIFF little-endian 头（II*\0），长度 ≥8 让 detectImageMime 识别为 image/tiff
+  const tiffBuf = Buffer.from('49492a000800000000000000', 'hex')
+  let uuidSeq = 0
+  const execFile = async (bin: string, args: string[]) => {
+    if (bin === 'osascript') return { stdout: 'TIFF' }
+    if (bin === 'sips') {
+      assert.ok(args.join(' ').includes('format png'), 'sips 应转 PNG')
+      return { stdout: '' }
+    }
+    throw new Error(`unexpected exec: ${bin} ${args.join(' ')}`)
+  }
+  const readFile = async (p: string) => {
+    if (p.endsWith('.tiff')) return tiffBuf
+    if (p.endsWith('.png')) return pngBuf // sips 转换输出
+    throw new Error(`unexpected readFile: ${p}`)
+  }
+
+  const result = await tryShellClipboard({
+    execFile,
+    platform: 'darwin',
+    readFile,
+    tmpdir: '/tmp',
+    randomUUID: () => `u${++uuidSeq}`,
+  } as any)
+  assert.ok(result, 'expected TIFF → sips → PNG pipeline to succeed')
+  assert.equal(result!.mime, 'image/png')
+  assert.equal(result!.source, 'png')
+  assert.ok(uuidSeq >= 2, 'TIFF 转换应再生成独立输出路径')
 })

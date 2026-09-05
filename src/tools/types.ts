@@ -185,6 +185,10 @@ export interface ToolCallParams {
   input: Record<string, unknown>
   toolUseId: string
   cwd: string
+  /** 当前会话审批档（tool-pipeline 每次调用注入）。仅极少数按档分叉的工具
+   *  读取（bash 沙箱拒绝的首触即授）；bare string 而非类型导入——tools 层
+   *  不反向依赖 agent 层类型（sandbox-profile 同先例）。 */
+  approvalMode?: string
   onOutput?: (chunk: string) => void
   /** Register a file written internally by a tool (e.g. ast-edit via writeFileAtomicAsync).
    *  Ensures evidence/filesModified and cerebellar gate are aware of the write. */

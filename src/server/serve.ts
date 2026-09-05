@@ -17,6 +17,7 @@ import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
 import { buildSessionRoutes } from './session-routes.js'
 import { buildMissionRoutes } from './mission-routes.js'
+import { buildRemoteInfoRoutes } from './remote-info-routes.js'
 import { MissionStore } from './mission-store.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildGreetingRoute } from './greeting-route.js'
@@ -363,6 +364,10 @@ export function buildDelegateSummary(
 
 export interface RunServeOptions {
   port?: number
+  /** 监听地址。默认 127.0.0.1（RIVET_SERVE_HOST / --host 覆盖）。 */
+  host?: string
+  /** Host header allowlist（不带端口）。默认读 RIVET_SERVE_HOSTS_ALLOW。 */
+  allowedHosts?: string[]
   token?: string
   /** Override the serve context (tests inject a fake). */
   context?: ServeContext
@@ -405,6 +410,10 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
     throw new Error('RIVET_SERVER_TOKEN is required for rivet serve')
   }
   const port = opts.port ?? DEFAULT_PORT
+  // 监听地址：显式 opts（serveCommand --host / 测试注入）> env（桌面壳经父 env 继承
+  // RIVET_SERVE_HOST 可达，零 Rust 改动）> 默认 127.0.0.1（行为不变）。
+  const host = (opts.host ?? process.env.RIVET_SERVE_HOST)?.trim() || '127.0.0.1'
+  const allowedHosts = opts.allowedHosts ?? parseHostsAllow(process.env.RIVET_SERVE_HOSTS_ALLOW)
   const ctx = opts.context ?? resolveServeContext()
   // Hot credential pickup: sessions created after a Settings edit must resolve
   // the CURRENT on-disk key, not the startup snapshot's. Only wired when the
@@ -639,8 +648,22 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   // Mission routes (P1 任务身份化): /missions/* — 与 session-manager 共享同一 store。
   Object.assign(routes, buildMissionRoutes(missionStore, apiToken))
 
+  // Remote-info route (P1 Mobile Remote): GET /remote/info — 桌面远程访问区块
+  // 数据源 + 手机连通自检。mode 由实际绑定地址决定（127.0.0.1 → loopback）。
+  Object.assign(routes, buildRemoteInfoRoutes(apiToken, { host, allowedHosts }))
+
   // Config routes: provider + API key management for the desktop settings UI.
-  Object.assign(routes, buildConfigRoutes(apiToken))
+  Object.assign(routes, buildConfigRoutes(apiToken, {
+    // 全局审批档位落盘后的实时生效（2026-09-05 跨盘审批链修复）：启动快照
+    // 就地更新（覆盖之后构建的 agent）+ 对无 per-session override 的存活
+    // agent 广播新档——否则 UI 显示「完全读写」而 agent 按启动旧档询问。
+    onApprovalConfigChanged: (approval) => {
+      try {
+        ;(ctx.config.agent as { approval: string }).approval = approval
+      } catch { /* 快照形态异常时跳过，广播兜底仍生效 */ }
+      try { sessions.applyGlobalApprovalMode(approval as Parameters<typeof sessions.applyGlobalApprovalMode>[0]) } catch { /* non-fatal */ }
+    },
+  }))
 
   // Environment route: host toolchain availability (python, uv, git, node) for setup UI.
   Object.assign(routes, buildEnvRoute(apiToken))
@@ -818,7 +841,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   }
 
   const listenT0 = performance.now()
-  const server = await startServer(port, routes, apiToken)
+  const server = await startServer(port, routes, apiToken, { host, allowedHosts })
   if (process.env.RIVET_SERVE_TIMING === '1') {
     console.error(`[serve-timing] listen ready ${Math.round(performance.now() - listenT0)}ms (since runServe start ${Date.now() - startedAt}ms)`)
   }
@@ -950,9 +973,21 @@ function writeExitBreadcrumb(reason: string, extra: Record<string, unknown> = {}
   }
 }
 
+/** 解析 RIVET_SERVE_HOSTS_ALLOW：逗号分隔、去空、拒绝含 / 或 : 的形态（无端口/无路径）。 */
+function parseHostsAllow(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined
+  const out: string[] = []
+  for (const part of raw.split(',')) {
+    const h = part.trim().toLowerCase()
+    if (!h || h.includes('/') || h.includes(':')) continue
+    out.push(h)
+  }
+  return out.length > 0 ? out : undefined
+}
+
 /**
- * CLI command handler for `rivet serve [--port N]`. Wires signal handlers and
- * prints the listening banner. Exits non-zero on misconfiguration.
+ * CLI command handler for `rivet serve [--port N] [--host ADDR]`. Wires signal
+ * handlers and prints the listening banner. Exits non-zero on misconfiguration.
  */
 export async function serveCommand(args: string[]): Promise<void> {
   const portIdx = args.indexOf('--port')
@@ -967,9 +1002,23 @@ export async function serveCommand(args: string[]): Promise<void> {
     process.exit(1)
   }
 
+  // --host <addr>：监听地址（默认 127.0.0.1，行为不变）。RIVET_SERVE_HOST
+  // env 在 runServe 内兜底——CLI 显式参数优先。
+  const hostIdx = args.indexOf('--host')
+  const rawHost = hostIdx >= 0 ? args[hostIdx + 1] : undefined
+  if (hostIdx >= 0 && (rawHost == null || rawHost === '')) {
+    console.error('Missing value for --host (e.g. --host 0.0.0.0)')
+    process.exit(1)
+  }
+  const host = rawHost?.trim()
+  if (host && (host.includes('://') || host.includes('/'))) {
+    console.error(`Invalid host: ${host} (expected IP or hostname, no scheme or path)`)
+    process.exit(1)
+  }
+
   let server: RunningServer
   try {
-    server = await runServe({ port })
+    server = await runServe({ port, ...(host ? { host } : {}) })
   } catch (err) {
     console.error((err as Error).message)
     process.exit(1)
@@ -997,6 +1046,7 @@ export async function serveCommand(args: string[]): Promise<void> {
     try { server.shared.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
   })
 
-  console.log(`Rivet Runtime API listening on http://localhost:${port}`)
+  const displayHost = host === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : (host ?? '127.0.0.1')
+  console.log(`Rivet Runtime API listening on http://${displayHost}:${port}`)
   console.log('Endpoints: GET /status, POST /abort, POST /prompt, /sessions/*')
 }

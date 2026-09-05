@@ -29,6 +29,11 @@ export interface TraceStore {
    *  只记录会被用于判定轮询的工具类（bash 命令类 + 观察型工具）。
    *  成功/失败都记录；绝不给 doom-loop 检测消费，避免污染失败循环语义。 */
   toolPollingClasses?: string[]
+  /** 单调递增的总追加轮询记录数（不受 slice(-24) 裁剪）。「本轮是否有新增轮询
+   *  记录」用该计数判定，而不是裁剪后数组长度：toolPollingClasses 长度到 24
+   *  上限后恒定不变，用长度代理会让 hasNewPolling 恒为 false，守卫在长会话里
+   *  静默失效（streak 只衰减、abort 分支不可达）。 */
+  toolPollingCount?: number
   /** bash 命令类指纹（归一化后的命令类，如 "git:status·success"）。
    *  精确指纹对 sed/head/python/tee 变体免疫——每个变体都是新 hash，
    *  doom-loop 检测器全程不拦（会话 43443098：28 次 git status 变体零拦截）。
@@ -106,7 +111,25 @@ const SUBCOMMAND_BINARIES = new Set(['git', 'npm', 'pnpm', 'yarn', 'cargo', 'doc
 export function bashCommandClass(command: string): string {
   // git anywhere in the command dominates — pipes/tee/embedding included.
   const gitMatch = command.match(/\bgit\s+(?:-[^\s]+\s+)*([a-z][a-z-]*)/)
-  if (gitMatch) return `git:${gitMatch[1]}`
+  if (gitMatch) {
+    const sub = gitMatch[1]!
+    // 内容查询型子命令按目标参数桶化（2026-09-05 用户报告：逐提交 git show
+    // 审查被误判轮询风暴）：不同目标 = 不同查询，不合并；同目标反复 = 真重复
+    // 仍可检测。状态型（status/log 无参）保持平类，等待状态的真轮询不受影响。
+    if (GIT_CONTENT_CMDS.has(sub)) {
+      const after = command.slice(gitMatch[0].length + gitMatch.index!)
+      // flag 前置形式（git show --stat <hash>、git show -p <hash>、
+      // git log --oneline <hash>）：跳过标志 token 再取目标，避免回落平类
+      // git:show 把多提交的合法审查合并成同一轮询类。
+      const target = after.trim().split(/\s+/)
+        .find(t => t && !t.startsWith('-'))
+        ?.replace(/^['"]|['"]$/g, '') ?? ''
+      if (target) {
+        return `git:${sub}:${target.slice(0, 12)}`
+      }
+    }
+    return `git:${sub}`
+  }
 
   const tokens = command.trim().split(/\s+/)
   let i = 0
@@ -200,8 +223,11 @@ export function recordToolPollingClass(
   return {
     ...store,
     toolPollingClasses: [...(store.toolPollingClasses ?? []), cls].slice(-24),
+    toolPollingCount: (store.toolPollingCount ?? 0) + 1,
   }
 }
+
+const GIT_CONTENT_CMDS = new Set(['show', 'diff', 'cat-file', 'blame', 'grep', 'log'])
 
 /** 独立于 doom 语义的轮询风暴等级。输入必须是 pollingClassOf 产出的类序列。 */
 export function getPollingStormLevel(classes: string[]): ToolStormLevel {
@@ -216,6 +242,10 @@ export interface PollingStormState {
   streak: number
   warned: boolean
   lastFilesModifiedCount: number
+  /** 上次评估时的轮询记录总追加数（store.toolPollingCount 的单调计数）——
+   *  「本轮是否有新增轮询记录」判据。不用 toolPollingClasses 数组长度：
+   *  系列被 slice(-24) 裁剪后长度恒定，长度代理会在长会话里恒判「无新增」。 */
+  lastPollingCount: number
 }
 
 export interface PollingStormVerdict {
@@ -229,16 +259,35 @@ export interface PollingStormVerdict {
  * 每轮工具执行后推进一次 polling-storm 状态机。文件修改数增长视为推进并
  * 清零 streak；pollingClass 连续 8 次同类后开始累计，streak≥3 发警告、
  * streak≥6 返回 abort（调用方负责 completeTurn 并释放 running）。
+ * store 参数持有裁剪后的轮询窗口（供风暴等级判定）与单调追加计数
+ * （toolPollingCount，供「本轮是否有新增」判定）。
  */
 export function evaluatePollingStorm(
   state: PollingStormState,
-  pollingClasses: string[],
+  store: TraceStore,
   filesModifiedCount: number,
 ): PollingStormVerdict {
+  const pollingClasses = store.toolPollingClasses ?? []
+  const pollingTotal = store.toolPollingCount ?? 0
   const modifiedThisTurn = filesModifiedCount > state.lastFilesModifiedCount
   state.lastFilesModifiedCount = filesModifiedCount
-  if (getPollingStormLevel(pollingClasses) === 'storm' && !modifiedThisTurn) {
+  // 迟到误杀修复（2026-09-05，用户报告）：只读轮（read/grep 等，pollingClassOf
+  // 返回 null 不追加系列）与无工具轮不产生新 polling 记录——本轮无新增且无文件
+  // 修改时模型在做事或收束，streak 向 0 收敛而不是在冻结的 storm 帧里继续 +1
+  // 直至 abort。优先级：文件修改（最强推进，任何轮清零）> 无新增衰减 > 有新增
+  // storm 递增。真轮询每轮都有新记录且无修改 → 8 连 + 6 轮照常熔断。
+  // 环形缓冲溢出修复（2026-09-05，对抗审查）：hasNewPolling 用 toolPollingCount
+  // 的单调计数而非裁剪后数组长度——长度到 24 上限后不再增长，长度代理会让累计
+  // 满 24 条后的长会话恒判「无新增」，streak 只衰减、abort 分支永久不可达。
+  const hasNewPolling = pollingTotal > state.lastPollingCount
+  state.lastPollingCount = pollingTotal
+  if (modifiedThisTurn) {
+    state.streak = 0
+    state.warned = false
+  } else if (hasNewPolling && getPollingStormLevel(pollingClasses) === 'storm') {
     state.streak = state.streak + 1
+  } else if (!hasNewPolling) {
+    state.streak = Math.max(0, state.streak - 1)
   } else {
     state.streak = 0
     state.warned = false

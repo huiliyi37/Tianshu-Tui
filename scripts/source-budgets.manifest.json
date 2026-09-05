@@ -3,24 +3,24 @@
   "redline": 800,
   "budgets": {
     "src/tui/engine/app.ts": {
-      "ceiling": 7682,
-      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。 7558→7637：choice-panel 输入子模式补光标编辑与粘贴（choicePanelInputCursor/按键光标语义全套/onPaste 路由分支/caret 接线 +73）+ 计划审批卡 separator 传参（+6）——输入子模式状态与 app.ts 现有 choicePanel* 字段族强耦合，拆分收益负；账本随债对齐。 7637→7675：/model 面板对标 CC：effort draft 状态 + </> 步进按键 + Enter/s 语义翻转 + 注册处 effort 数据组装（+38）。 7675→7682：routing nudge 接线（routingConfiguredProvider 字段/setter + onChange ctx + Tab 采纳 /config 特例，+7）。"
+      "ceiling": 7895,
+      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。 7558→7637：choice-panel 输入子模式补光标编辑与粘贴（choicePanelInputCursor/按键光标语义全套/onPaste 路由分支/caret 接线 +73）+ 计划审批卡 separator 传参（+6）——输入子模式状态与 app.ts 现有 choicePanel* 字段族强耦合，拆分收益负；账本随债对齐。 7637→7675：/model 面板对标 CC：effort draft 状态 + </> 步进按键 + Enter/s 语义翻转 + 注册处 effort 数据组装（+38）。 7675→7682：routing nudge 接线（routingConfiguredProvider 字段/setter + onChange ctx + Tab 采纳 /config 特例，+7）。 7682→7811：轮询工具连击折叠接线（ba1505928，P1）+ 峰谷计价段喂参（e94676f44），2026-09-05 账本对齐。 7811→7833：team 等待期可见性——流式分支帧剥离接线（+9）+ renderLive 2e 紧凑团队卡槽位（+13）；渲染主体复用 format/team-panel.ts compact 档与 team-panel-model.ts 纯函数，app.ts 只落接线7833→7895：Termux 触摸终端滚动修复——输出冻结（Ctrl+S 切换 + 四门 + ⏸ 标记行）与矮屏降级门（状态行/footer/高水位半屏），+62，2026-09-05（issue #57）。"
     },
     "src/server/session-manager.ts": {
-      "ceiling": 6196,
-      "note": "5741→5800：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →5804：turn_complete 带 ttft/tokS 指标（W-stats，2026-08-31）。 →5822：getPerformance 薄读面（解析在 cache/session-performance.ts 纯模块，2026-09-01）。 →5824：getPerformance 改异步读 + parseSessionPerformanceAsync 分片解析（大日志不阻塞事件循环，2026-09-01 审查收口）。 →5832：Zen P1——onZenPhaseChange 回调接 zen_phase 会话事件（桌面读面徽章，+8，2026-09-01）。 5832→6191：Codex 基线潮服务端增长（fork 转录容错/交接/会话生命周期，+359，2026-09-03 对齐）。 6191→6196：handoff 归档判定容差注释+比较修正（+5，2026-09-03）。"
+      "ceiling": 6253,
+      "note": "5741→5800：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →5804：turn_complete 带 ttft/tokS 指标（W-stats，2026-08-31）。 →5822：getPerformance 薄读面（解析在 cache/session-performance.ts 纯模块，2026-09-01）。 →5824：getPerformance 改异步读 + parseSessionPerformanceAsync 分片解析（大日志不阻塞事件循环，2026-09-01 审查收口）。 →5832：Zen P1——onZenPhaseChange 回调接 zen_phase 会话事件（桌面读面徽章，+8，2026-09-01）。 5832→6191：Codex 基线潮服务端增长（fork 转录容错/交接/会话生命周期，+359，2026-09-03 对齐）。 6191→6196：handoff 归档判定容差注释+比较修正（+5，2026-09-03）。 6196→6232：写工具卡死四层收口（8aa0c9ba1 跨会话拉入），2026-09-05 账本对齐6232→6253：两轮修复入账——写工具卡死链收口（healOrphansBeforeReliabilityDecision + applyGlobalApprovalMode + env 超时）与跨盘审批链（rehydrate 档位回读 + skip 感知 plan 自动批准），+21，2026-09-05。"
     },
     "src/tui/slash-commands.ts": {
       "ceiling": 4620,
       "note": "4536→4620：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/coordinator.ts": {
-      "ceiling": 3526,
-      "note": "3487→3491：classifyWorkerError 导出 + 兜底接线修复（failureReason 归类收口）。3491→3492：审查 LOW 收口——/signal/i 收紧注释。3492→3495：stall-sweep 击杀消息归 stalled（补分支 + 注释，2026-08-26 审查收尾）。 3495→3504：T5 计划指针传导补线——DelegationRequest.planRef 字段（+5 注释含）+ 四个建单点透传（单/批 × 读/写，+4），打通 plan_task/team_orchestrate → WorkOrder.planRef → worker「计划全文见：<path>」。 →3510：SEA P2c——DelegationRequest.extraAllowedTools 字段 + 单/批建单透传（专家席方法论工具授予，+6，2026-09-01）。 →3526：2026-09-02 审查修复——resume 消息接 trimMessagesToTokenBudget（import + 调用，+3）+ 注释（+3），SEA 会话批次（+16 含测试对齐）。"
+      "ceiling": 3545,
+      "note": "3487→3491：classifyWorkerError 导出 + 兜底接线修复（failureReason 归类收口）。3491→3492：审查 LOW 收口——/signal/i 收紧注释。3492→3495：stall-sweep 击杀消息归 stalled（补分支 + 注释，2026-08-26 审查收尾）。 3495→3504：T5 计划指针传导补线——DelegationRequest.planRef 字段（+5 注释含）+ 四个建单点透传（单/批 × 读/写，+4），打通 plan_task/team_orchestrate → WorkOrder.planRef → worker「计划全文见：<path>」。 →3510：SEA P2c——DelegationRequest.extraAllowedTools 字段 + 单/批建单透传（专家席方法论工具授予，+6，2026-09-01）。 →3526：2026-09-02 审查修复——resume 消息接 trimMessagesToTokenBudget（import + 调用，+3）+ 注释（+3），SEA 会话批次（+16 含测试对齐）。 →3545：completed-aborted 两个 abort 收尾点接线 + maybeExpandSummary abort 守卫（+19）（2026-09-05 team-76dc14a1 事故修复（plan_task 超时脱离等待 + abort 误标 failed））。"
     },
     "src/agent/loop.ts": {
-      "ceiling": 3069,
-      "note": "2854→2928：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）；其中捆绑技能消融移除 pin 链并挂 <plan-executing> 卸载点（净增约 15 行）。 2928→3008：Zen Mode（禅模式）接入——相位状态机构造/arm 接线/解锁点 onZenEscape/turn 边界 triage+预算/meta 镜像（+80，2026-08-29）。 3008→3012：zen_unlock 解锁声明工具注入读面（+4，2026-08-29）。 →3018：账本对齐——zen 门控叠加修复（gateToolDefinitions 先行，zen 相位不再绕过 disabledTools，2026-08-31）。 →3020：lastTurnMetrics 字段（W-stats，2026-08-31）。 →3023：decode 累计字段（W-stats cockpit 数据，2026-09-01）。 →3027：审查 P2 收口——run() 轮开始清 lastTurnMetrics（失败轮不带上轮 ttft/tps，+2）+ lastTurnMetrics/decodeMs 类型扩展（+2，2026-09-01）。 →3047：Zen P0——resume 恢复 zenTurns 预算（foldZenFromMeta 接线 + arm 传参，+5）+ getZenUnregisteredHint 幻觉调用行动指引（+15，2026-09-01）。 →3064：Zen P1——zenPhaseCallbacks 字段 + run 开始补发相位镜像 + emitZenPhaseEvent（+17，2026-09-01）。 →3069：2026-09-02 审查修复——zenTurnBoundary tick 后 persistZenPhase('zen') 镜像落盘（resume 不清零预算的写侧，+5，SEA 会话批次）。"
+      "ceiling": 3114,
+      "note": "2854→2928：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）；其中捆绑技能消融移除 pin 链并挂 <plan-executing> 卸载点（净增约 15 行）。 2928→3008：Zen Mode（禅模式）接入——相位状态机构造/arm 接线/解锁点 onZenEscape/turn 边界 triage+预算/meta 镜像（+80，2026-08-29）。 3008→3012：zen_unlock 解锁声明工具注入读面（+4，2026-08-29）。 →3018：账本对齐——zen 门控叠加修复（gateToolDefinitions 先行，zen 相位不再绕过 disabledTools，2026-08-31）。 →3020：lastTurnMetrics 字段（W-stats，2026-08-31）。 →3023：decode 累计字段（W-stats cockpit 数据，2026-09-01）。 →3027：审查 P2 收口——run() 轮开始清 lastTurnMetrics（失败轮不带上轮 ttft/tps，+2）+ lastTurnMetrics/decodeMs 类型扩展（+2，2026-09-01）。 →3047：Zen P0——resume 恢复 zenTurns 预算（foldZenFromMeta 接线 + arm 传参，+5）+ getZenUnregisteredHint 幻觉调用行动指引（+15，2026-09-01）。 →3064：Zen P1——zenPhaseCallbacks 字段 + run 开始补发相位镜像 + emitZenPhaseEvent（+17，2026-09-01）。 →3069：2026-09-02 审查修复——zenTurnBoundary tick 后 persistZenPhase('zen') 镜像落盘（resume 不清零预算的写侧，+5，SEA 会话批次）。 3069→3114：写工具卡死四层收口（8aa0c9ba1 跨会话拉入），2026-09-05 账本对齐"
     },
     "src/bootstrap.ts": {
       "ceiling": 2511
@@ -30,23 +30,23 @@
       "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。 2648→2664：config login 子命令（OAuth 登录落地，/login 幽灵指引闭环）——case +12、帮助文本 +1、帮助示例区 +3。 2664→2682：setDefaultModelConfig 扩展 defaultEffort（undefined=不动/null·auto=删字段/显式档=落盘，+17）——/model 面板 effort 随默认持久化（CC 对标）。 2682→2643：migratePresetModelBackfill 迁出至 preset-model-backfill.ts（结构棘轮拆分；随迁收紧 userSaved 判据——用户删模型不再被预设回流）。 2682→2689：账本对齐实际行数（存量已超限，P0-1 同 PR 收口，2026-09-04）。"
     },
     "src/main.ts": {
-      "ceiling": 2382,
-      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 2299→2323：账本对齐实际行数（HEAD 既有超限 2320 在先——此前两版提交均选择不抬；本轮 +3 为协同建议开关接线 orchestrationHint 入 TuiApp，一并登记对齐）。 2323→2330：connectExec needsLogin 分支（OAuth 预设不热切换、指引 /login，+7）。 2330→2336：首启自动弹 /connect 接哨兵抑制 + 抑制态单行提示（+6）。 2336→2352：model-picker entries 加 effortSupported（resolveCapabilities）+ 两 exec 消费 effort + applyPickerEffort helper（+16）。 2352→2358：routing nudge 数据源注入 setRoutingConfiguredProvider（workers/review profiles 非空判定，+6）。 2358→2382：账本对齐实际行数——Zen Mode 禅模式启动接线（zen 系提交增长欠账，2026-08-31）。"
+      "ceiling": 2394,
+      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 2299→2323：账本对齐实际行数（HEAD 既有超限 2320 在先——此前两版提交均选择不抬；本轮 +3 为协同建议开关接线 orchestrationHint 入 TuiApp，一并登记对齐）。 2323→2330：connectExec needsLogin 分支（OAuth 预设不热切换、指引 /login，+7）。 2330→2336：首启自动弹 /connect 接哨兵抑制 + 抑制态单行提示（+6）。 2336→2352：model-picker entries 加 effortSupported（resolveCapabilities）+ 两 exec 消费 effort + applyPickerEffort helper（+16）。 2352→2358：routing nudge 数据源注入 setRoutingConfiguredProvider（workers/review profiles 非空判定，+6）。 2358→2382：账本对齐实际行数——Zen Mode 禅模式启动接线（zen 系提交增长欠账，2026-08-31）。 2382→2394：峰谷计价标示——metricsProvider 加 pricingPhase + deepseek 60s idle 准点刷新定时器（e94676f44），2026-09-05 账本对齐"
     },
     "src/tui/pi/latex-to-unicode.ts": {
       "ceiling": 2071
     },
     "src/agent/tool-pipeline.ts": {
       "ceiling": 2151,
-      "note": "2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由 / （审批路由单一职责功能增长，+29 行）。 2099→2111：T11 超时恢复指引 TOOL_TIMEOUT_RECOVERY_HINT（+7）+ 存量对齐（HEAD 2106 已超 7，2026-08-30）。 →2139：账本对齐——trace 扩 durationMs/cu 字段 + computer_use LITE 遥测写入（W2，2026-08-31）。 →2151：Zen P0——未注册工具报错附加 zen_unlock 行动指引（deps 字段 + execute promise catch 包装，+12，2026-09-01）。"
+      "note": "2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由 / （审批路由单一职责功能增长，+29 行）。 2099→2111：T11 超时恢复指引 TOOL_TIMEOUT_RECOVERY_HINT（+7）+ 存量对齐（HEAD 2106 已超 7，2026-08-30）。 →2139：账本对齐——trace 扩 durationMs/cu 字段 + computer_use LITE 遥测写入（W2，2026-08-31）。 →2151：Zen P0——未注册工具报错附加 zen_unlock 行动指引（deps 字段 + execute promise catch 包装，+12，2026-09-01）。 →2151：完全读写档零打扰收口（plan 提交即批准守卫、出界路径首触即授、skip 界定助手，净增长沿接缝内聚，2026-09-05）。"
     },
     "src/agent/tool-execution.ts": {
-      "ceiling": 815,
-      "note": "810→814：Zen P0——ToolExecutionDeps.getZenUnregisteredHint 字段 + buildDeps 转发（+4，2026-09-01）。810 为入账时存量，已超 800 红线但未登记；本次随改动一并纳入点名棘轮收口（纯数据 diff 即评审对象）。 814→815：P0-1 polling-storm guard 记录 toolPollingClasses（+1，2026-09-04）。"
+      "ceiling": 906,
+      "note": "810→814：Zen P0——ToolExecutionDeps.getZenUnregisteredHint 字段 + buildDeps 转发（+4，2026-09-01）。810 为入账时存量，已超 800 红线但未登记；本次随改动一并纳入点名棘轮收口（纯数据 diff 即评审对象）。 814→815：P0-1 polling-storm guard 记录 toolPollingClasses（+1，2026-09-04）。 815→906：轮询风暴熔断记录点（dec4bc993）+ 写工具卡死四层收口（8aa0c9ba1），2026-09-05 账本对齐"
     },
     "src/server/session-routes.ts": {
-      "ceiling": 2178,
-      "note": "1995→1997：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →1999：账本对齐——@Computer 挂载后台权限探测（W4-15，+2，2026-08-31）。 →2007：GET /sessions/:id/performance 端点（W-stats P1-3，2026-09-01）。 →2008：performance 路由改 await 异步 getPerformance（大日志分片解析，+1，2026-09-01 审查收口）。 →2178：Codex 基线潮路由增长（fork/diff 评论/置顶/分支搜索端点，+170，2026-09-03 对齐）。"
+      "ceiling": 2193,
+      "note": "1995→1997：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →1999：账本对齐——@Computer 挂载后台权限探测（W4-15，+2，2026-08-31）。 →2007：GET /sessions/:id/performance 端点（W-stats P1-3，2026-09-01）。 →2008：performance 路由改 await 异步 getPerformance（大日志分片解析，+1，2026-09-01 审查收口）。 →2178：Codex 基线潮路由增长（fork/diff 评论/置顶/分支搜索端点，+170，2026-09-03 对齐）。2178→2193：b487af5ab 新会话粘图全链 create 路由收图（+15，归属原提交，2026-09-05 补记基线）。"
     },
     "src/prompt/engine.ts": {
       "ceiling": 1645,
@@ -68,8 +68,8 @@
       "note": "1492→1563：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/turn-orchestrator.ts": {
-      "ceiling": 1501,
-      "note": "1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。 1471→1501：P0-1 polling-storm guard 接线——deps getFilesModifiedCount + evaluatePollingStorm 调用（+30，2026-09-04）。"
+      "ceiling": 1556,
+      "note": "1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。 1471→1501：P0-1 polling-storm guard 接线——deps getFilesModifiedCount + evaluatePollingStorm 调用（+30，2026-09-04）。 1501→1530：轮询风暴 streak 机（dec4bc993）+ 写工具收口（8aa0c9ba1）+ 自治档硬上限 AUTONOMOUS_HARD_CAP_TURNS + resolveEffectiveTurnLimit（d5ad24936），2026-09-05 账本对齐 1530→1533：armBatchDeadline 校准项注释（审查 LOW，2026-09-05） 1533→1535：审查收口——toolPollingCount 单调计数（99f7fe819 跨会话提交，代入账本对齐，2026-09-05） 1535→1540：B2 门加 stormEngaged 分层（轮询形状让位 storm guard，2026-09-05）1540→1556：917e39293 B2 收敛提醒评分静默收窄（归属原提交，2026-09-05 补记基线）。"
     },
     "src/agent/loop-factory.ts": {
       "ceiling": 1527,
@@ -94,8 +94,8 @@
       "note": "1169→1200：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/worker-session.ts": {
-      "ceiling": 1208,
-      "note": "1155→1206：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1206→1208：账本对齐实际行数——zen_unlock 解锁声明通道（zen 系提交，2026-08-31）"
+      "ceiling": 1211,
+      "note": "1155→1206：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1206→1208：账本对齐实际行数——zen_unlock 解锁声明通道（zen 系提交，2026-08-31） →1211：abort 分支指向 upgradeAbortedDelivery 的注释（+3）（2026-09-05 team-76dc14a1 事故修复（plan_task 超时脱离等待 + abort 误标 failed））。"
     },
     "src/tools/galaxy.ts": {
       "ceiling": 1176,
@@ -125,16 +125,16 @@
       "ceiling": 1026
     },
     "src/agent/work-order.ts": {
-      "ceiling": 1128,
-      "note": "1004→1019：status×failureReason 消费矩阵注释（组合矩阵收口文档化，+15）。 1019→1088：T5 planRef 字段（schema+input+双创建函数透传）+ T7 constraints 预算分级两遍扫描（计划级独立预算）+ 存量对齐（HEAD 1066 已超，其他会话积累 47 行；本 PR 增 22 行，2026-08-30）。 →1090：SEA P2c——extraAllowedTools 字段 + 读写工单 union（+2，2026-09-01）。 →1128：2026-09-02 审查修复——三重否决（run_tests 授予解除 disallowedTools 禁令/写执行核心禁令不可解）+ evidence 独立预算（MAX_EVIDENCE_CONSTRAINT_CHARS + 消费侧切片收口，+38，SEA 会话批次）。"
+      "ceiling": 1140,
+      "note": "1004→1019：status×failureReason 消费矩阵注释（组合矩阵收口文档化，+15）。 1019→1088：T5 planRef 字段（schema+input+双创建函数透传）+ T7 constraints 预算分级两遍扫描（计划级独立预算）+ 存量对齐（HEAD 1066 已超，其他会话积累 47 行；本 PR 增 22 行，2026-08-30）。 →1090：SEA P2c——extraAllowedTools 字段 + 读写工单 union（+2，2026-09-01）。 →1128：2026-09-02 审查修复——三重否决（run_tests 授予解除 disallowedTools 禁令/写执行核心禁令不可解）+ evidence 独立预算（MAX_EVIDENCE_CONSTRAINT_CHARS + 消费侧切片收口，+38，SEA 会话批次）。 →1140：deliveredOnAbort 系统盖章字段（output schema 侧 + 纪律注释，+12）（2026-09-05 team-76dc14a1 事故修复（plan_task 超时脱离等待 + abort 误标 failed））。"
     },
     "src/tools/run-tests.ts": {
       "ceiling": 1004,
       "note": "995→1004：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/server/serve.ts": {
-      "ceiling": 1005,
-      "note": "989→1005：settings-intent 端点装配（Wave3 自然语言改设置，2026-08-29）"
+      "ceiling": 1060,
+      "note": "989→1005：settings-intent 端点装配（Wave3 自然语言改设置，2026-08-29） 1005→1012：账本对齐实际行数（2026-09-05）1012→1015：跨盘审批链——PUT /config/approval 实时生效接线（快照更新 + applyGlobalApprovalMode 广播 + globalApprovalMode 构造项，+3，2026-09-05）。1015→1060：P1 Mobile Remote Wave1——--host/RIVET_SERVE_HOST 解析 + parseHostsAllow + /remote/info 装配（+40 含注释；host 段与 serveCommand 属进程装配职责，拆子模块收益负，2026-09-05）。"
     },
     "src/agent/starflow-orchestrator.ts": {
       "ceiling": 1076,
@@ -145,24 +145,24 @@
       "note": "976→987：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 987→990：JXA 宿主 EOF 死循环守卫（Number() 强转注释，孤儿 osascript 100% CPU 修复，6b45eb0c2，2026-08-31） →1002：账本对齐——walk 解析失败显式抛错（宽容重试 + 截断头部，2026-08-31）。 →1019：账本对齐——snapshot 走树带回 winBounds + captureWindow 双读并行（W3-7，2026-08-31）。 →1102：账本对齐——waitFor 宿主内轮询（W3-8，2026-08-31）。 →1112：W4 权限探针/warmedApps 等增量（2026-08-31）。 →1136：账本对齐——Finder 归因三项削减（NO_CHILDREN/ROW_CAP/背景窗浅层 + 归因注释，2026-08-31）。"
     },
     "src/agent/create-runtime-hooks.ts": {
-      "ceiling": 978,
-      "note": "958→968→976：接入记忆形成侧（auto-capture）+ 会话结束巩固（session-consolidation）hook。 976→978：账本对齐实际行数——Zen Mode 禅模式接线（zen 系提交，2026-08-31）"
+      "ceiling": 985,
+      "note": "958→968→976：接入记忆形成侧（auto-capture）+ 会话结束巩固（session-consolidation）hook。 976→978：账本对齐实际行数——Zen Mode 禅模式接线（zen 系提交，2026-08-31） →985：detached-plan hook 装配（import + 条件挂载，+7）（2026-09-05 team-76dc14a1 事故修复（plan_task 超时脱离等待 + abort 误标 failed））。"
     },
     "src/tools/bash.ts": {
-      "ceiling": 950,
-      "note": "943→950：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 965,
+      "note": "943→950：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 950→965：沙箱拒绝首触即授判定（shouldAutoGrantSandboxDenial，skip 档零打扰承诺覆盖沙箱层）+ 模式化 banner（2026-09-05）"
     },
     "src/skills/skill-loader.ts": {
       "ceiling": 1022,
       "note": "941→1022：捆绑技能退役清理——RETIRED_BUNDLED_SKILLS 名单（名字+SHA-256）+ retireMatchingSkillCopies 一次性清理逻辑（撤出三项 + 消融两项的存量副本清理，+81）。"
     },
     "src/config/env-registry.ts": {
-      "ceiling": 1034,
-      "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）956→962：RIVET_ORCHESTRATION_HINT 登记（+6）962→968：RIVET_ADAPTIVE_MEMORY 的 shadow/on/off 发布开关登记（+6）968→974：RIVET_MEMORY_AUTO_CAPTURE 登记（+6）974→980：RIVET_MEMORY_CONSOLIDATION 登记（+6）980→986：RIVET_MEMORY_BACKFILL 登记（+6，历史会话回填 opt-in 开关）986→1034：gen-env-registry.ts 全量再生成收口漂移（153→168 变量，含 SEA RIVET_STRONG_EXPERT_ROUTING/RIVET_WORKER_ISOLATION 等 2026-08-13 后入库未登记的 8+ 开关，+48，2026-09-02）。"
+      "ceiling": 1064,
+      "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）956→962：RIVET_ORCHESTRATION_HINT 登记（+6）962→968：RIVET_ADAPTIVE_MEMORY 的 shadow/on/off 发布开关登记（+6）968→974：RIVET_MEMORY_AUTO_CAPTURE 登记（+6）974→980：RIVET_MEMORY_CONSOLIDATION 登记（+6）980→986：RIVET_MEMORY_BACKFILL 登记（+6，历史会话回填 opt-in 开关）986→1034：gen-env-registry.ts 全量再生成收口漂移（153→168 变量，含 SEA RIVET_STRONG_EXPERT_ROUTING/RIVET_WORKER_ISOLATION 等 2026-08-13 后入库未登记的 8+ 开关，+48，2026-09-02）。1034→1046：RIVET_APPROVAL_TIMEOUT_MS / RIVET_TOOL_BATCH_DEADLINE_MS 登记（gen-env-registry 再生成，+12，2026-09-05）。 1046→1052：RIVET_PLAN_EXECUTE_TIMEOUT_MS 登记（f659c1f56 plan_task 超时转后台），2026-09-05。1052→1064：RIVET_SERVE_HOST / RIVET_SERVE_HOSTS_ALLOW 登记（P1 Mobile Remote Wave 1，gen-env-registry 再生成，+12，2026-09-05）"
     },
     "src/server/config-routes.ts": {
-      "ceiling": 1081,
-      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。 1048→1055：账本对齐实际行数（合并 defc472c0 模型设置优化轮——预设来源标注/配置前预览路由，+7 净增）。 →1062：完全读写档（c0b4fb444 远端批次）——/config/approval 活体沙箱联动（unsandboxed→RIVET_SANDBOX env 即时翻，+7，2026-09-02 收束对齐）。 →1066：B6/L3 trust 四端点外提 config-routes-project-trust.ts 子模块——主表仅剩 import+spread+注释（+4），巨石内容净减 57 行（2026-09-02）。 1066→1081：账本对齐实际行数（存量已超限，P0-1 同 PR 收口，2026-09-04）。"
+      "ceiling": 1094,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。 1048→1055：账本对齐实际行数（合并 defc472c0 模型设置优化轮——预设来源标注/配置前预览路由，+7 净增）。 →1062：完全读写档（c0b4fb444 远端批次）——/config/approval 活体沙箱联动（unsandboxed→RIVET_SANDBOX env 即时翻，+7，2026-09-02 收束对齐）。 →1066：B6/L3 trust 四端点外提 config-routes-project-trust.ts 子模块——主表仅剩 import+spread+注释（+4），巨石内容净减 57 行（2026-09-02）。 1066→1081：账本对齐实际行数（存量已超限，P0-1 同 PR 收口，2026-09-04）。 1081→1094：首次安装 API Key 删除原语 + key 管理引导端点（d585f213c 跨会话合入），2026-09-05 账本对齐"
     },
     "src/pro/computer-use/cdp/driver.ts": {
       "ceiling": 910,

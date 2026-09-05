@@ -153,7 +153,7 @@ export async function tryShellClipboard(opts?: ShellClipboardOpts): Promise<Clip
   return null
 }
 
-// ── macOS: osascript ──
+// ── macOS: osascript（单次嵌套 coercion）──
 
 async function tryMacOSClipboard(
   ef: (bin: string, args: string[]) => Promise<{ stdout: string }>,
@@ -161,54 +161,78 @@ async function tryMacOSClipboard(
   td: string,
   uuid: () => string,
 ): Promise<ClipboardImage | null> {
-  // 1. Check if clipboard contains an image
-  let info: string
+  // 单次 spawn 完成「分类 + 读字节」：嵌套 try 依次尝试 PNGf → TIFF → JPEG
+  // coercion，命中者写入对应扩展名的临时文件并回显类名，全败回显 "none"。
+  // 相比旧的「clipboard info 预检 + 再写文件」两次 spawn：省一次子进程往返，
+  // 消除两次调用间剪贴板被改写的竞态窗口，且不再依赖 clipboard info 的可读名
+  // 文本判定——浏览器复制的 JPEG（info 报 "JPEG picture"，旧逻辑漏判为文本）
+  // 现在由 JPEG coercion 直接兜住。类名必须用四字符码 PNGf：
+  // `as «class PNG»` 在 osascript 里是语法错误 -2741（2026-09-05 本机实测），
+  // 旧实现的 PNG 读图分支因此实际从未生效（被 native 依赖路径掩盖）。
+  const pngPath = `${td}/rivet-clip-${uuid()}.png`
+  const tiffPath = `${td}/rivet-clip-${uuid()}.tiff`
+  const jpgPath = `${td}/rivet-clip-${uuid()}.jpg`
+  const script = [
+    'try',
+    '  set imgData to the clipboard as «class PNGf»',
+    `  set filePath to POSIX file "${pngPath}" as text`,
+    '  set fRef to open for access file filePath with write permission',
+    '  set eof of fRef to 0',
+    '  write imgData to fRef',
+    '  close access fRef',
+    '  return "PNGf"',
+    'on error',
+    '  try',
+    '    set imgData to the clipboard as «class TIFF»',
+    `    set filePath to POSIX file "${tiffPath}" as text`,
+    '    set fRef to open for access file filePath with write permission',
+    '    set eof of fRef to 0',
+    '    write imgData to fRef',
+    '    close access fRef',
+    '    return "TIFF"',
+    '  on error',
+    '    try',
+    '      set imgData to the clipboard as «class JPEG»',
+    `      set filePath to POSIX file "${jpgPath}" as text`,
+    '      set fRef to open for access file filePath with write permission',
+    '      set eof of fRef to 0',
+    '      write imgData to fRef',
+    '      close access fRef',
+    '      return "JPEG"',
+    '    on error',
+    '      return "none"',
+    '    end try',
+    '  end try',
+    'end try',
+  ].join('\n')
+
+  let stdout: string
   try {
-    const r = await ef('osascript', ['-e', 'clipboard info'])
-    info = r.stdout
+    const r = await ef('osascript', ['-e', script])
+    stdout = r.stdout
   } catch {
+    // osascript 缺失/执行失败（无工具/无剪贴板授权）→ 调用方走文本粘贴
     return null
   }
-  if (!info.includes('«class PNG»') && !info.includes('«class jp2') && !info.includes('TIFF picture') && !info.includes('GIF picture')) {
-    return null
-  }
-
-  // 2. Determine the class to read
-  let imageClass = '«class PNG»'
-  if (info.includes('«class PNG»')) imageClass = '«class PNG»'
-  else if (info.includes('TIFF picture')) imageClass = 'TIFF picture'
-  else if (info.includes('GIF picture')) imageClass = 'GIF picture'
-
-  // 3. Write clipboard image to temp file
-  const tmpPath = `${td}/rivet-clip-${uuid()}.png`
   try {
-    await ef('osascript', [
-      '-e',
-      `set theFile to (open for access POSIX file "${tmpPath}" with write permission)`,
-      '-e',
-      'set eof of theFile to 0',
-      '-e',
-      `write (the clipboard as ${imageClass}) to theFile`,
-      '-e',
-      'close access theFile',
-    ])
-
-    const buf = await rf(tmpPath)
+    const cls = stdout.trim()
+    if (!cls || cls === 'none') return null
+    const target = cls === 'TIFF' ? tiffPath : cls === 'JPEG' ? jpgPath : cls === 'PNGf' ? pngPath : null
+    if (!target) return null
+    const buf = await rf(target)
     if (!buf || buf.length === 0) return null
 
-    // TIFF → PNG 自动转换：macOS 剪贴板原生格式是 TIFF，
-    // 截图工具粘贴时若无可选的 PNG 类会直接写 TIFF 数据。
+    // TIFF → PNG 自动转换：macOS 截图剪贴板原生格式是 TIFF，
     // 大多数视觉模型 API 不支持 TIFF，用 sips 转 PNG。
     const mime = detectImageMime(buf, 'clipboard.png')
     if (mime === 'image/tiff' || mime === 'image/bmp') {
-      const pngBuf = await convertToPng(buf, tmpPath, ef, td, uuid)
+      const pngBuf = await convertToPng(buf, target, ef, td, uuid, rf)
       if (pngBuf) return bufToClipboardImage(pngBuf, 'clipboard.png')
     }
     return bufToClipboardImage(buf, 'clipboard.png')
-  } catch {
-    return null
   } finally {
-    await unlink(tmpPath).catch(() => { /* best-effort */ })
+    // 三条路径都清——嵌套脚本可能在任何一级命中或失败，残余文件不留
+    await Promise.all([pngPath, tiffPath, jpgPath].map((p) => unlink(p).catch(() => {})))
   }
 }
 
@@ -272,18 +296,17 @@ async function convertToPng(
   ef: (bin: string, args: string[]) => Promise<{ stdout: string }>,
   td: string,
   uuid: () => string,
+  rf?: (path: string) => Promise<Buffer>,
 ): Promise<Buffer | null> {
   if (process.platform !== 'darwin') return null
   const pngPath = `${td}/rivet-clip-${uuid()}.png`
   try {
     await ef('sips', ['-s', 'format', 'png', srcPath, '--out', pngPath])
-    const { readFile } = await import('node:fs/promises')
-    const pngBuf = await readFile(pngPath)
+    const pngBuf = await (rf ?? readFile)(pngPath)
     return pngBuf.length > 0 ? pngBuf : null
   } catch {
     return null
   } finally {
-    const { unlink } = await import('node:fs/promises')
     await unlink(pngPath).catch(() => {})
   }
 }

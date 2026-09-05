@@ -128,6 +128,41 @@ test('GlanceBar 显示可见对话 token（conversationTokens），颜色仍按�
   assert.ok(!plain.includes('◧95k/1.0M'), `不应显示 API 总 prompt: ${plain}`)
 })
 
+test('pricingPhase 接线：provider 给值时 GlanceBar 渲染计价段，缺省不渲染', () => {
+  const { app, out } = makeApp()
+  // deepseek 侧（main.ts metricsProvider 仅在 providerName==='deepseek' 时给值）
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 50_000,
+    conversationTokens: 50_000,
+    maxTokens: 200_000,
+    cacheHitRate: 0.9,
+    cost: 0,
+    inputTokens: 50_000,
+    outputTokens: 1_000,
+    lastRealPromptTokens: 48_000,
+    pricingPhase: 'offpeak',
+  }))
+  app.setModelInfo('test', 200_000)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('◷闲时半价'), `offpeak 应渲染计价段: ${plain}`)
+
+  // 非 deepseek：metrics 无 pricingPhase → 计价段消失
+  out.chunks.length = 0
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 50_000,
+    conversationTokens: 50_000,
+    maxTokens: 200_000,
+    cacheHitRate: 0.9,
+    cost: 0,
+    inputTokens: 50_000,
+    outputTokens: 1_000,
+    lastRealPromptTokens: 48_000,
+  }))
+  app.setModelInfo('test', 200_000)
+  const plain2 = stripAnsi(out.chunks.join(''))
+  assert.ok(!plain2.includes('◷'), `非 deepseek 不应渲染计价段: ${plain2}`)
+})
+
 test('getMetrics 暴露与 GlanceBar 同源的真实指标（供 SlashRouter 读 cost/maxTokens）', () => {
   const { app } = makeApp()
   // 无 provider 时为 null（SlashRouter 回退 models[0]/cost:0）

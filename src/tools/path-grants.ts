@@ -258,6 +258,32 @@ export function loadPersistedGrants(cwd: string): void {
 }
 
 /**
+ * 盘根/目录存在性探测的 TTL 记忆（2026-09-05 跨盘审批链顺手项）：
+ * applyConfiguredPathGrants 对每条配置目录同步 existsSync——Windows 上死映射
+ * 盘符/断连网络盘的单次探测可达秒级，单线程 sidecar 上 26 个盘根逐个探测会
+ * 冻结事件循环（审批事件都发不出去）。启动与 PUT /config/permission-dirs 都
+ * 会全量重放，同一批路径短时间内反复探测纯属浪费。TTL 内命中记忆零阻塞；
+ * 调用方传 force（用户刚保存配置）时绕过记忆当场实测——新挂载的盘不能等 TTL。
+ */
+const ROOT_EXISTS_TTL_MS = 30_000
+const rootExistsMemo = new Map<string, { exists: boolean; at: number }>()
+
+export function resetRootExistsMemoForTest(): void {
+  rootExistsMemo.clear()
+}
+
+function rootExistsCached(root: string, force = false): boolean {
+  const now = Date.now()
+  if (!force) {
+    const hit = rootExistsMemo.get(root)
+    if (hit && now - hit.at < ROOT_EXISTS_TTL_MS) return hit.exists
+  }
+  const exists = existsSync(root)
+  rootExistsMemo.set(root, { exists, at: now })
+  return exists
+}
+
+/**
  * Apply the user's standing directory grants from config
  * (`permissions.additionalReadDirs` / `additionalWriteDirs`) at session start —
  * the Codex-style "give this folder to the agent" model. Session-scoped
@@ -267,6 +293,7 @@ export function loadPersistedGrants(cwd: string): void {
  */
 export function applyConfiguredPathGrants(
   permissions: { additionalReadDirs?: string[]; additionalWriteDirs?: string[] } | undefined,
+  opts?: { force?: boolean },
 ): void {
   if (!permissions) return
   const apply = (dirs: string[] | undefined, mode: GrantMode): void => {
@@ -274,7 +301,7 @@ export function applyConfiguredPathGrants(
       const trimmed = raw.trim()
       if (!trimmed) continue
       const root = resolve(expandHome(trimmed))
-      if (!existsSync(root)) continue
+      if (!rootExistsCached(root, opts?.force)) continue
       grantPath(root, mode, { persist: false })
     }
   }

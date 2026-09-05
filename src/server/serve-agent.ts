@@ -784,7 +784,7 @@ export function buildManagedAgent(
     abort: () => agent.abort(),
     setApprovalMode: (mode) => {
       agent.setApprovalMode(mode)
-      // 自治联动无限轮次，非自治恢复默认 200
+      // 自治联动大硬上限（AUTONOMOUS_HARD_CAP_TURNS=1000，orchestrator 解释 0），非自治恢复默认 200
       agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
     },
     enterPlanMode: () => agent.enterPlanMode(),

@@ -1,17 +1,10 @@
 /**
- * Ctrl+C pending-exit 确认窗口的取消契约。
+ * Ctrl+C pending-exit 确认窗口的取消契约（对齐 Claude Code 的 Ctrl+C 语义）。
  *
- * 背景：空闲 + 空输入第一次 Ctrl+C 进入「(Ctrl+C again to exit)」确认窗口
- * （2 秒），渲染层隐藏输入框只显示提示行。原实现该窗口只能等 2 秒超时或
- * 二次 Ctrl+C 退出，存在四个缺陷：
- *  1. Esc 无法取消——落到 idle 分支只记 lastEscAt，输入框不恢复；400ms 内
- *     双击 Esc 还会误开 rewind overlay；
- *  2. 幽灵输入——窗口内打字，文字进 value 但输入框仍被隐藏；
- *  3. 不可见提交——窗口内打的字（不可见）可被 Enter 提交；
- *  4. 带输入退出——窗口内打了字再 Ctrl+C 直接退出而非清空输入。
- *
- * 契约：Esc / 任意编辑键 / 粘贴 = 用户继续对话 → 取消确认、恢复输入框；
- * 有输入时二次 Ctrl+C 退化为「清空输入」，不退出。
+ * 背景：空闲态第一次 Ctrl+C 进入退出确认窗口（不依赖输入框是否有内容——
+ * Claude Code 中 Ctrl+C 从不清空输入，只承担「中断回合 / 双击退出」两职），
+ * 输入框与其内容原样保留，提示行显示在输入框上方。窗口内二次 Ctrl+C 退出，
+ * Esc / 任意编辑键 / 粘贴 = 用户继续对话 → 取消确认。
  *
  * 跨平台：Ctrl+C(0x03) / Esc(0x1B lone) 在 Windows / macOS / Linux 终端的
  * raw mode 下字节送达一致（InputHandler 解析层无平台分支），契约对全平台等效。
@@ -38,7 +31,7 @@ function makeStartedApp() {
 type StartedApp = ReturnType<typeof makeStartedApp>
 const CTRL_C = '\x03'
 const ESC = '\x1B'
-const HINT = '(Ctrl+C again to exit)'
+const HINT = '再次按 Ctrl+C 退出'
 const INPUT_BORDER = /[╭┏┌]/
 const tick = (ms: number) => new Promise(r => setTimeout(r, ms))
 
@@ -55,7 +48,7 @@ test('Esc 取消退出确认：输入框恢复、提示消失、不污染 rewind
   await tick(120) // lone ESC 经 80ms 超时派发
   assert.equal(t.pendingSince(), 0, 'Esc 取消确认窗口')
   assert.ok(!t.plain().includes(HINT), '提示行消失（新增帧不再写提示）')
-  assert.ok(INPUT_BORDER.test(t.plain()), '输入框回归')
+  assert.ok(INPUT_BORDER.test(t.plain()), '输入框始终可见')
   assert.equal(t.lastEscAt(), 0, '取消用的 Esc 不计入双击 rewind 计时')
 })
 
@@ -72,24 +65,39 @@ test('编辑键取消确认：打字立即可见，不再幽灵输入', async ()
   assert.ok(!t.plain().includes(HINT), '提示行消失（新增帧不再写提示）')
 })
 
-test('确认窗口内打字后二次 Ctrl+C：清空输入而非退出', async () => {
+test('有内容首按 Ctrl+C：内容保留、进入退出确认（对齐 Claude Code：不清空）', async () => {
   const t = makeStartedApp()
-  t.stdin.dataHandler!(CTRL_C)
   t.stdin.dataHandler!('hi')
   await tick(60)
+  t.out.clear()
   t.stdin.dataHandler!(CTRL_C)
-  await tick(30)
-  assert.equal(t.exitedRef(), false, '有输入时不退出')
-  assert.equal(t.inputText(), '', '退化为清空输入')
+  assert.equal(t.exitedRef(), false, '首次 Ctrl+C 不退出')
+  assert.ok(t.pendingSince() > 0, '有内容时同样进入退出确认窗口')
+  assert.equal(t.inputText(), 'hi', '输入内容原样保留，不被清空')
+  assert.ok(t.plain().includes(HINT), '提示行显示在输入框上方')
+  assert.ok(INPUT_BORDER.test(t.plain()), '输入框仍在渲染（提示行不替换输入框）')
 })
 
-test('空输入时二次 Ctrl+C 仍然退出（原行为防回归）', async () => {
+test('窗口内打字取消确认后，二次 Ctrl+C 重新进窗口而非退出', async () => {
+  const t = makeStartedApp()
+  t.stdin.dataHandler!(CTRL_C)
+  t.stdin.dataHandler!('hi') // 编辑键取消确认
+  await tick(60)
+  assert.equal(t.pendingSince(), 0, '打字已取消确认窗口')
+  t.stdin.dataHandler!(CTRL_C)
+  await tick(30)
+  assert.equal(t.exitedRef(), false, '取消后再次 Ctrl+C 只是重新进入确认窗口')
+  assert.equal(t.inputText(), 'hi', '草稿保留（Ctrl+C 不清空输入）')
+  assert.ok(t.pendingSince() > 0, '重新进入 pending 窗口')
+})
+
+test('确认窗口内二次 Ctrl+C 退出（无论窗口期输入框是否有内容）', async () => {
   const t = makeStartedApp()
   t.stdin.dataHandler!(CTRL_C)
   await tick(30)
   t.stdin.dataHandler!(CTRL_C)
   await tick(30)
-  assert.equal(t.exitedRef(), true, '空输入确认窗口内二次 Ctrl+C 退出')
+  assert.equal(t.exitedRef(), true, '确认窗口内二次 Ctrl+C 退出')
 })
 
 test('Esc 取消后可重新进入确认窗口（循环可用）', async () => {
@@ -100,4 +108,32 @@ test('Esc 取消后可重新进入确认窗口（循环可用）', async () => {
   t.stdin.dataHandler!(CTRL_C)
   assert.ok(t.pendingSince() > 0, '取消后再次 Ctrl+C 重新进入确认窗口')
   assert.ok(t.plain().includes(HINT), '提示行再次显示')
+})
+
+// ── 旧定时器残留竞态（app.ts 首按 setTimeout fire-and-forget 的静态反例）──
+// 回归：取消后重入的确认窗口，不得被第一次进入时武装的 2s 旧定时器提前截断。
+// 时间线（近似）：t=0 首按（旧定时器约 t=2000 到期）→ 编辑键取消（仅复位状态，
+// 旧实现不清定时器）→ t≈950 重入（新窗口应到 t≈2950 才自动关）→ t≈2100 断言。
+// 旧实现在 t≈2000 把 pending 清零 → 重入窗口只剩 ~50ms（被截断）；修复后旧定时器
+// 在取消时即被清理，t≈2100 时重入窗口应仍开着（尚未到 t≈2950 自动到期点）。
+test('取消后重入的确认窗口不被旧 2s 定时器截断（回归：旧定时器残留竞态）', async () => {
+  const t = makeStartedApp()
+  // t≈0：首按，武装 2s 自动取消定时器
+  t.stdin.dataHandler!(CTRL_C)
+  assert.ok(t.pendingSince() > 0, '首按进入确认窗口')
+  // 编辑键取消：pending 复位（旧实现此处不清定时器 → 定时器残留）
+  t.stdin.dataHandler!('a')
+  assert.equal(t.pendingSince(), 0, '编辑键取消确认窗口')
+  // t≈950：旧定时器（t≈2000 到期）尚未触发，此刻重入 → 新窗口应到 t≈2950 才关
+  await tick(900)
+  assert.equal(t.pendingSince(), 0, '等待期窗口保持取消态')
+  t.stdin.dataHandler!(CTRL_C)
+  assert.ok(t.pendingSince() > 0, '重入后重新进入确认窗口')
+  // t≈2100：已越过旧定时器到期点（t≈2000），但远未到重入窗口自动到期点（t≈2950）
+  await tick(1150)
+  assert.ok(t.pendingSince() > 0, '重入窗口未被旧定时器提前截断（窗口应延续到重入 +2s）')
+  // 窗口仍存活：此刻双击退出必须生效（若被截断，此按会退化成再次重入）
+  t.stdin.dataHandler!(CTRL_C)
+  await tick(30)
+  assert.equal(t.exitedRef(), true, '重入窗口内双击 Ctrl+C 仍退出')
 })

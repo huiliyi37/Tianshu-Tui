@@ -2078,6 +2078,37 @@ describe('executeToolUse', () => {
       assert.notEqual((result.toolResult as any).is_error, true)
     })
   })
+
+  it('skip 档出界路径首触即授——未读过的出界路径写操作当场授予（零审批打扰）', async () => {
+    // 唯一路径：进程内 grant store 会话级累积，避免跨测试污染
+    _resetGrantsForTest()
+    const target = `/opt/rivet-skip-grant-probe/${Date.now()}/file.txt`
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'dangerously-skip-permissions',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { throw new Error('skip 档不得触发审批') } }
+
+    const result = await executeToolUse(
+      { id: 'tu-skip-firstwrite', name: 'write_file', input: { file_path: target, content: 'x' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(executed, true)
+    assert.equal((result.toolResult as any).is_error, false)
+    assert.ok(isWriteGranted(target), '写授权应当场授予（旧行为要求先读过才升级，未读先写要多花一轮）')
+    _resetGrantsForTest()
+  })
 })
 
 // ── Artifact Intercept 端到端验证 ──────────────────────────────────────

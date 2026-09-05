@@ -85,7 +85,10 @@ export function toolCardTitle(toolName: string, toolInput?: Record<string, unkno
   const verb = toolTitleVerb(toolName)
   let arg = toolInput ? toolArgSummary(toolName, toolInput) : ''
   if (!arg && rawPath) arg = rawPath.split('/').pop() ?? rawPath
-  return arg ? `${verb}(${arg})` : verb
+  // 未登记家族的工具（verb 兜底 'tool'，如 council_convene / mcp__*）：标题回退到
+  // 工具原名——长工具等待期必须自报身份，裸「Tool (3m24s)」对用户零信息。
+  const base = verb === 'Tool' ? toolName : verb
+  return arg ? `${base}(${arg})` : base
 }
 
 /** 缩进 body 行：第一行 `⎿  `，后续行对齐缩进 */

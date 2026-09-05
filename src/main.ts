@@ -102,6 +102,7 @@ import { applyInitCommit, formatInitApplyReport } from './bootstrap/init-scaffol
 import { checkForUpdate, formatUpdateBanner, detectInstallRoot, getCurrentVersion } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 import { computeUsageCost, findModelPricing } from './utils/pricing.js'
+import { deepseekPricingPhase } from './utils/pricing-phase.js'
 import { projectCacheTelemetry } from './tui/cache-telemetry.js'
 import { CachePanelSource } from './tui/cache-panel-source.js'
 import { sessionsDir } from './config/paths.js'
@@ -1903,8 +1904,19 @@ async function main() {
       inputTokens: total.input_tokens,
       outputTokens: total.output_tokens,
       lastRealPromptTokens: session.getLastRealPromptTokens(),
+      // DeepSeek 峰时/闲时计价提醒：仅官方 deepseek provider 给值，其余缺省不渲染。
+      // 闭包动态读当前 providerName，/model 切走/切回自动显隐。
+      pricingPhase: providerName === 'deepseek' ? deepseekPricingPhase(Date.now()) : undefined,
     }
   })
+
+  // ── 计价时段准点翻转刷新 ─────────────────────────────────────
+  // GlanceBar idle 不周期刷新，峰/闲切换最多滞后到下次渲染。仿 StatusLineRunner
+  // 先例加 unref'd 60s 定时器兜底（仅 deepseek 需要；unref 不阻塞进程退出）。
+  if (ctx.agent.config.providerName === 'deepseek') {
+    const pricingPhaseTimer = setInterval(() => tuiApp.forceRedraw(), 60_000)
+    pricingPhaseTimer.unref?.()
+  }
 
   // ── 常驻任务面板 provider（todo 列表）──────────────────────
   // 统一读本会话 refs.todoStore（多会话隔离的 canonical 源）。TUI 下它就是全局

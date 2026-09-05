@@ -458,4 +458,4 @@ describe('Goal 计划倒计时自动批准（2026-07-24）', () => {
     const pending = manager.getEvents(id)!.events.filter((e) => e.type === 'plan_auto_approve_pending')
     assert.equal(pending.length, 0, '路由层不得把缺省值兜成 true')
   })
-})
+});

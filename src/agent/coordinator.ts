@@ -44,6 +44,7 @@ import {
   deriveWorkerSessionId,
   normalizeReviewVerdictStatus,
 } from './work-order.js'
+import { upgradeAbortedDelivery } from './abort-delivery.js'
 import { buildContractProjection, type ContractProjection } from './contract-projection.js'
 import { reconcileWithObjective } from './worker-objective-gate.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
@@ -1749,6 +1750,9 @@ export class DelegationCoordinator {
       if (result.summary.length >= SUMMARY_MIN_LENGTH) break
       // Only expand passed results — blocked/failed results are inherently terse
       if (result.status !== 'passed') break
+      // abort 优先（与 decideContinuation/decideRevision 同纪律）：调用方已中止时
+      // 不再为摘要扩写多烧一轮——completed-aborted 升级的 passed 结果尤其如此。
+      if (mergedSignal.aborted) break
 
       const expansionOrder: WorkOrder = {
         ...order,
@@ -2977,7 +2981,9 @@ export class DelegationCoordinator {
           if (checkpoint?.partialResult) {
             const salvaged = salvageWorkerResult(checkpoint.partialResult, order.id)
             if (salvaged) {
-              const enriched = identify(this.enrichResult(salvaged, selected.model, workerConfig.providerName))
+              // completed-aborted：打捞结果仍是 blocked，但产物可能已落盘——按 fs 事实升级。
+              const delivered = upgradeAbortedDelivery(order, this.config.cwd ?? workerConfig.cwd, dispatchStartedAt, salvaged)
+              const enriched = identify(this.enrichResult(delivered, selected.model, workerConfig.providerName))
               return {
                 status: 'completed' as const,
                 order,
@@ -2992,7 +2998,13 @@ export class DelegationCoordinator {
           }
         }
         if (!isAbort && profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-        const degraded = identify(this.enrichResult(workerFailureResult(order, error, { failureReason: classifyWorkerError(error) }), selected.model, workerConfig.providerName))
+        const degraded = identify(this.enrichResult(
+          // completed-aborted：abort（caller_aborted/timeout）收尾且产物已写盘时，
+          // 按已交付计入而非一味 failed（2026-09-05 team-76dc14a1 事故修复 B）。
+          upgradeAbortedDelivery(order, this.config.cwd ?? workerConfig.cwd, dispatchStartedAt, workerFailureResult(order, error, { failureReason: classifyWorkerError(error) })),
+          selected.model,
+          workerConfig.providerName,
+        ))
         return {
           status: 'completed' as const,
           order,
@@ -3020,6 +3032,13 @@ export class DelegationCoordinator {
         this.collaboration.releaseLocks(this.config.sessionId)
       }
     }
+
+    // completed-aborted（2026-09-05 team-76dc14a1 事故修复 B）：worker 被 abort
+    // （父信号 / 预算墙钟）斩杀但其 scope 声明产物已按预期写盘时，按已交付计入
+    // （passed + deliveredOnAbort，证据钉死 unverified），不再一味 failed。
+    // 必须在续跑/复核/熔断记账之前：升级后的 passed 不该再触发任何重跑，
+    // 连败计数也不该为「交付后被斩杀」记一笔。真正失败（无产物落盘）原样穿过。
+    run = { ...run, result: upgradeAbortedDelivery(order, this.config.cwd ?? workerConfig.cwd, dispatchStartedAt, run.result) }
 
     // 预算耗尽 → 自动续跑。必须在 enrichResult / 熔断记账 / 升级判定之前：否则
     // 首轮的 blocked 先污染连败计数，而续跑产出的结果又拿不到模型元数据。

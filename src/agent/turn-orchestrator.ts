@@ -28,9 +28,19 @@ import { describeAction } from './evidence-obligation.js'
 import type { AdvisoryEntry } from './advisory-bus.js'
 import { debugLog } from '../utils/debug.js'
 import { hasActionIntent, hasWriteActionIntent, turnUsedOnlyReadTools, DELIVERY_SIGNAL_RE } from './action-intent-detector.js'
-import { b1ReadOnlyLimitForWindow, b2TurnLimitForWindow, isB2ConvergingRecently } from './window-thresholds.js'
+import { b1ReadOnlyLimitForWindow, b2TurnLimitForWindow, B2_SILENCE_PROGRESS_WINDOW, isB2ConvergingRecently } from './window-thresholds.js'
 
 // ── Types re-exported for deps interface ──
+
+/** 自治档（maxTurns ≤ 0）的轮数硬上限。polling-flood 教训：「实际无限」把
+ *  逃逸面全压给收敛守卫。1000 ≈ 默认档 200 的 5 倍——大到正常自治任务永远
+ *  碰不到，小到失控 run 有限耗尽并走统一耗尽路径（含最终轮预警）。 */
+export const AUTONOMOUS_HARD_CAP_TURNS = 1000
+
+/** maxTurns ≤ 0（自治/YOLO）→ 有限硬上限；正数原样。 */
+export function resolveEffectiveTurnLimit(maxTurns: number): number {
+  return maxTurns > 0 ? maxTurns : AUTONOMOUS_HARD_CAP_TURNS
+}
 
 export interface StreamTurnParams {
   request: import('../api/oai-types.js').OaiChatRequest
@@ -347,6 +357,19 @@ const MAX_WEDGE_REPEATS = 3
  *  4.4s 峰值 + 余量；wedged 工具的兜底仍是 runResumePreflightOai。 */
 const TOOL_ABORT_DRAIN_MS = 6000
 
+/** 工具批的批级硬限（毫秒）。远超合法批时长（工具级 120s 超时 × 批内工具数
+ *  + 收尾链界定值），只在批整体楔死时作为最后熔断触发 onHardStall → abort →
+ *  executeBatch 的 backfill/安全网收账。0 = 关闭（回到完全 disarm 的旧行为）。
+ *  RIVET_TOOL_BATCH_DEADLINE_MS 覆盖。 */
+function toolBatchDeadlineMs(): number {
+  const raw = process.env.RIVET_TOOL_BATCH_DEADLINE_MS
+  if (raw != null && raw.trim() !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return 15 * 60_000
+}
+
 /** Order-preserving fingerprint of a tool batch (name + input). Two batches with
  *  the same tools and args produce the same string, so a model re-emitting an
  *  identical failing call is detectable across turns. */
@@ -447,9 +470,15 @@ export class TurnOrchestrator {
     // latch stays set, and the next user message gets routed to the steer
     // buffer instead of starting a new run.
     let finalTurnCompleted = false
-    const pollingStorm = { streak: 0, warned: false, lastFilesModifiedCount: this.deps.getFilesModifiedCount() }
+    const pollingStorm = { streak: 0, warned: false, lastFilesModifiedCount: this.deps.getFilesModifiedCount(), lastPollingCount: this.deps.state.traceStore?.toolPollingCount ?? 0 }
     let actionIntentFiredThisRun = false
     let turnCallLimitAdvisoryFired = false
+    // B2 静默的"近期文件推进"佐证（2026-09-05 评分漂移修复）：isB2ConvergingRecently
+    // 只证明轨迹平稳——echo 空转等无产出循环评分也高（classifyBashCommandActivity
+    // 把纯 echo 判 productive，productive-stagnation 不压分）。静默仅授予
+    // "持续编辑/验证"：最近一次文件修改距当前 ≤ B2_SILENCE_PROGRESS_WINDOW 轮。
+    let b2LastProgressTurn = Number.NEGATIVE_INFINITY
+    let b2SeenFilesModified = this.deps.getFilesModifiedCount()
     // B1 readonly-spiral 的 run 级一次性标志：与 B2 对称——触发后本 run 不再
     // 重复提醒。此前仅清零计数器，清零后连续只读重新累积到阈值又触发，
     // 长只读 run 里周期性复触发（实测 58 轮 run 内 9/18/27 三次），且重复
@@ -463,12 +492,12 @@ export class TurnOrchestrator {
     let obligationGateFiredThisRun = false
 
     try {
-      // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
-    // loop uses Number.MAX_SAFE_INTEGER as a practically-infinite upper bound so
-    // wedged-loop / convergence / context-pressure guards still terminate a
-    // runaway run — only the artificial turn-count ceiling is removed.
+      // maxTurns <= 0 = 自治档（YOLO）。给一个很大但有限的硬上限而非真正的
+    // 无限（polling-flood 教训：无限把逃逸面全压给收敛守卫）——守卫（doom/
+    // 轮询风暴/上下文压力）依然先行终止失控 run；真触顶时走统一耗尽路径，
+    // 最终轮预警同样生效（触顶前注入「立即产出最终答复」，不被静默斩杀）。
     const maxTurns = this.deps.getMaxTurns()
-    const effectiveLimit = maxTurns > 0 ? maxTurns : Number.MAX_SAFE_INTEGER
+    const effectiveLimit = resolveEffectiveTurnLimit(maxTurns)
     for (let turn = 0; turn < effectiveLimit; turn++) {
         this.deps.state.thetaRequestsThisTurn = 0
         this.deps.state.runLoopTurn = turn
@@ -477,11 +506,11 @@ export class TurnOrchestrator {
         // 结构性缓解 max-turns 耗尽事故:此前模型在最后一轮仍起工具调用,
         // 被守卫斩杀时一句结论都没留下(审查 worker 反复 "exhausted without
         // a final turn" 的根因——prompt 级收敛提示不足以约束探索欲)。
-        if (maxTurns > 0 && turn === effectiveLimit - 1) {
+        if (turn === effectiveLimit - 1) {
           // W1 通道分级：functional 类不限流（turn-budget 只有一次触发机会，
           // 无需 resetSrCount hack）。fail-closed 守卫保留为纵深防御。
           this.deps.appendSystemReminder(
-            `<system-reminder>[turn budget] This is your FINAL turn — the turn budget (${maxTurns}) is exhausted after this turn. Do NOT start new tool-call chains. Based on the evidence you already have, emit your final answer/report immediately (workers: emit the WorkerResult JSON contract now, best-effort with what you have).</system-reminder>`,
+            `<system-reminder>[turn budget] This is your FINAL turn — the turn budget (${effectiveLimit}) is exhausted after this turn. Do NOT start new tool-call chains. Based on the evidence you already have, emit your final answer/report immediately (workers: emit the WorkerResult JSON contract now, best-effort with what you have).</system-reminder>`,
             'functional'
           )
         }
@@ -920,8 +949,17 @@ export class TurnOrchestrator {
           // 误判为楔死。保留 informational heartbeat（UI 仍显示"still working"），
           // 仅挂起 hardStall 熔断；工具完成后 rearm。工具级 timeout + rejectOnAbort
           // 提供真正的 hang 保护。
+          //
+          // 2026-09-05 写工具卡死链收口：完全 disarm 曾让楔死在收尾 await 的批
+          // 「永远不 settle」，用户杀进程 → 持久化孤儿 → 下个会话开门冻手。
+          // armBatchDeadline 保留 disarm 语义但加一次性硬限（默认 15 分钟，远超
+          // 合法批时长；RIVET_TOOL_BATCH_DEADLINE_MS=0 关闭），硬限到点走
+          // onHardStall → abort → executeBatch 的 backfill/安全网把结果收账。
+          // 校准项（审查 LOW）：runPostTool/视觉桥的界定值（15s/20s）是批内每
+          // 工具叠加的——批内多个带图工具的最坏合法时长可能逼近 15 分钟；若实机
+          // 出现「合法批被误斩」，先调批次构成再抬上限。
           const toolHeartbeat = this.deps.getHeartbeat()
-          toolHeartbeat?.disarmWatchdog()
+          toolHeartbeat?.armBatchDeadline(toolBatchDeadlineMs())
           let r: Awaited<ReturnType<typeof this.deps.executeBatch>>
           // Keep a handle on the batch itself: rejectOnAbort races it against the
           // abort signal and stops AWAITING on Esc, but the batch keeps running and
@@ -1014,7 +1052,7 @@ export class TurnOrchestrator {
           // 这里用独立 pollingClass 轨迹先 warn 再 completeTurn，释放 running。
           const pollingVerdict = evaluatePollingStorm(
             pollingStorm,
-            r.traceStore.toolPollingClasses ?? [],
+            r.traceStore,
             this.deps.getFilesModifiedCount(),
           )
           if (pollingVerdict.action === 'abort') {
@@ -1022,6 +1060,8 @@ export class TurnOrchestrator {
               source: 'tool-storm',
               turn,
               voluntary: false,
+              // 本轮有文本产出仍被熔断 = 疑似误报（stop-reason.ts reasoningActive 语义）。
+              reasoningActive: assistantResponded,
               detail: `${pollingVerdict.className} ×${pollingVerdict.streak}`,
             }, callbacks)
             await rejectOnAbort(
@@ -1117,8 +1157,23 @@ export class TurnOrchestrator {
           // 收敛轨迹门（会话 506a5e86 优化）：轮数高但最近收敛 score 轨迹良好
           // （持续编辑/验证的合法长任务）→ 静默且不置位 fired——后续轮次轨迹
           // 转坏（原地打转/停滞）仍可触发。冷启动/无轨迹 → 照发（旧行为）。
+          // 评分漂移收窄（2026-09-05）：score 高仅证明轨迹平稳——echo/printf
+          // 空转等零产出循环评分也高（classifyBashCommandActivity 判 productive）。
+          // 静默额外要求近期文件推进（≤ B2_SILENCE_PROGRESS_WINDOW 轮），与
+          // 门注释"持续编辑/验证的合法长任务"的语义对齐。
+          const filesModifiedNow = this.deps.getFilesModifiedCount()
+          if (filesModifiedNow > b2SeenFilesModified) {
+            b2SeenFilesModified = filesModifiedNow
+            b2LastProgressTurn = turn
+          }
           const b2Converging = isB2ConvergingRecently(this.deps.getConvergenceScoreHistory?.() ?? [])
-          if (!turnCallLimitAdvisoryFired && turn >= b2TurnLimit && !b2Converging) {
+            && turn - b2LastProgressTurn <= B2_SILENCE_PROGRESS_WINDOW
+          // 与 polling-storm guard 的分层（dec4bc993 回归修复，2026-09-05）：
+          // 轮询形状的 run（同类轮询连击）由 storm guard 接管——软提醒对轮询
+          // 无效已被实证（polling-flood 事故），B2 让位，不再与其争
+          // functional SR 通道的 run 级配额。非轮询形状的高轮次 run 才走 B2。
+          const stormEngaged = pollingStorm.warned || pollingStorm.streak > 0
+          if (!turnCallLimitAdvisoryFired && turn >= b2TurnLimit && !b2Converging && !stormEngaged) {
             turnCallLimitAdvisoryFired = true
             // 缺陷 2 修复（会话 aa9737bb 审查）：planning 态是合法探寻
             // （规划/设计/调研），高轮次是任务性质不是发散——催收敛只产生

@@ -93,6 +93,17 @@ function formatTodoBadge(t: TodoSummary, compact: boolean, theme: RivetTheme, fl
   return color(text, theme.primary)
 }
 
+/**
+ * DeepSeek 计价时段徽章：compact `◷闲½`/`◷峰`，full `◷闲时半价`/`◷峰时`。
+ * 闲时（半价）用 success 高亮（省钱信号），峰时用 muted（常态不抢眼）。
+ * 仅提醒当前计价时段，不改记账口径（费用段 ¥ 数字不按时段折半）。
+ */
+function formatPricingPhaseBadge(phase: 'peak' | 'offpeak', compact: boolean, theme: RivetTheme): string {
+  return phase === 'offpeak'
+    ? color(compact ? '◷闲½' : '◷闲时半价', theme.success)
+    : color(compact ? '◷峰' : '◷峰时', theme.muted)
+}
+
 export interface GlanceBarInput {
   /** 终端宽度 */
   width: number
@@ -111,6 +122,8 @@ export interface GlanceBarInput {
   cacheHitRate?: number
   /** 缓存健康度状态（projectCacheTelemetry 三态判定） */
   cacheStatus?: CacheStatus
+  /** DeepSeek 计价时段（仅 provider 为 deepseek 时给出；缺省不渲染计价段） */
+  pricingPhase?: 'peak' | 'offpeak'
   /** 上下文占比 0-1 */
   contextRatio?: number
   /** API 实际 prompt token（用于颜色阈值，反映真实窗口压力） */
@@ -253,6 +266,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
       // 无缓存数据时显示占位，避免右侧空洞或误导
       parts.push(color('⚡-', theme.dim))
     }
+    // DeepSeek 计价时段：与缓存段相邻（同为费用决策信息）；非 deepseek 缺省不占位
+    if (input.pricingPhase) parts.push(formatPricingPhaseBadge(input.pricingPhase, true, theme))
     const cRatio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
       ? input.estimatedTokens / input.maxTokens : 0
     if (input.maxTokens && input.maxTokens > 0 && input.estimatedTokens !== undefined) {
@@ -306,6 +321,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     // 无缓存数据时显示占位，避免右侧空洞或误导
     parts.push(color('⚡-', theme.dim))
   }
+  // DeepSeek 计价时段：与缓存段相邻（同为费用决策信息）；非 deepseek 缺省不占位
+  if (input.pricingPhase) parts.push(formatPricingPhaseBadge(input.pricingPhase, false, theme))
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
   const displayTokens = input.conversationTokens !== undefined ? input.conversationTokens : input.estimatedTokens

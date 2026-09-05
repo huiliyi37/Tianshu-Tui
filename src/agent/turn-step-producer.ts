@@ -769,6 +769,10 @@ export class TurnStepProducer {
       this.self.flushAdvisoryEfficacy()
     }
 
+    // 修孤儿先于冻结：integrity 维度的 minimal 判定如果先跑，会把本 turn
+    // 马上就要被 preflight 修好的持久化孤儿当成 error，开门先冻写工具与 bash
+    // （2026-09-05 桌面端写工具卡死链）。先愈合再决策。
+    this.self.healOrphansBeforeReliabilityDecision()
     this.self.refreshReliabilityDecision()
 
     _tb = Date.now()

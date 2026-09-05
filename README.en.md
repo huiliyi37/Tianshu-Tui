@@ -12,6 +12,8 @@
   <a href="https://tianshuharness.com"><b>🌐 tianshuharness.com</b></a> · 
   📖 <b>English</b> · 
   <a href="README.md">🇨🇳 中文</a> · 
+  <a href="README.ja.md">🇯🇵 日本語</a> · 
+  <a href="README.ko.md">🇰🇷 한국어</a> · 
   <a href="docs/stars/genesis-stele.en.md">✦ Star Stele</a> · 
   <a href="docs/user-guide.md">📚 User Guide</a> · 
   <a href="docs/user-guide-sandbox-permissions.md">🛡️ Sandbox</a> · 
@@ -262,6 +264,7 @@ DeepSeek charges 50× more for cache misses. Tianshu's prompt engine is built ar
 - **Cache-aware compaction** — Compaction preserves the first 2 messages as cache anchor.
 - **Resume cache inheritance** — The frozen prefix snapshot is persisted to disk (every user boundary + on shutdown); on resume it is read back and fed to the new engine, avoiding a byte-0 full miss. Falls back to full rebuild only when there is no snapshot, the file is corrupt, or the provider cache has expired.
 - **Diagnostics** — `/debug cache` shows hit rate, miss reason analysis, and per-turn cache history.
+- **Peak/off-peak pricing indicator** — DeepSeek's official off-peak half pricing (peak = Beijing time weekdays 9:00–12:00 / 14:00–18:00; everything else half price): both the TUI status bar and the desktop Composer show a `◷闲½` / `◷峰` badge with a countdown to the next transition in the tooltip. Shown only for the official DeepSeek provider; zero configuration.
 
 Real-world hit rate: 95–99% steady state on long sessions. This is not "every request hits" — the cache can fragment at certain boundaries (see below). Per-request logs from real engineering sessions (5 sessions, 2,001 requests, 645M input tokens, bill cut from ¥880 to ¥20) with reproduction commands: [Observability Harness](docs/reference/observability-harness.md).
 

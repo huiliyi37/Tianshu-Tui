@@ -1121,3 +1121,45 @@ describe('project-trust routes', () => {
     }
   })
 })
+
+describe('PUT /config/approval — 全局档位变更广播 hook', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-approval-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('档位落盘成功后以新档触发 onApprovalConfigChanged', async () => {
+    writeConfig(home, {})
+    const seen: string[] = []
+    const router = createRouter(buildConfigRoutes(TOKEN, {
+      onApprovalConfigChanged: (approval) => { seen.push(approval) },
+    }))
+    const res = await router('PUT', '/config/approval', { approval: 'dangerously-skip-permissions' }, AUTH)
+    assert.equal(res.status, 200)
+    assert.deepEqual(seen, ['dangerously-skip-permissions'])
+  })
+
+  it('非法档位 400 时 hook 不触发；未传 hook 的调用方行为不变', async () => {
+    writeConfig(home, {})
+    const seen: string[] = []
+    const router = createRouter(buildConfigRoutes(TOKEN, {
+      onApprovalConfigChanged: (approval) => { seen.push(approval) },
+    }))
+    const bad = await router('PUT', '/config/approval', { approval: 'nope' }, AUTH)
+    assert.equal(bad.status, 400)
+    assert.equal(seen.length, 0)
+
+    const plain = createRouter(buildConfigRoutes(TOKEN))
+    const ok = await plain('PUT', '/config/approval', { approval: 'manual' }, AUTH)
+    assert.equal(ok.status, 200)
+  })
+})
