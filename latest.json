@@ -1,15 +1,19 @@
 {
   "version": "3.15.0",
-  "notes": "v3.15.0（稳定基线版）——v3.10~3.14 的前缀缓存出现不稳定（命中率异常下降/缓存反复碎裂），叠加滚动跟随、写工具挂起等问题。本版回退到稳定的 v3.9.0 基线：升级后即回到 3.9 的行为基线，缓存与整体行为恢复稳定。缓存根因修复已在进行，后续版本将在验证通过后重新带入 3.10+ 能力。详见 Release 说明。",
-  "pub_date": "2026-09-06T08:05:38.491Z",
+  "notes": "v3.15.0（稳定基线版）——回退到 v3.9.0 基线接管更新链：3.10–3.14 前缀缓存不稳定（命中率下降/反复碎裂）叠加滚动跟随与写工具挂起问题，本版回到实测稳定的 3.9 行为基线（仅版本号推进，无代码改动）。已知取舍：无 3.10+ 的修复（Linux 输入法 #55、滚动换代 #54、手机遥控、跨盘授权、写工具挂起、worker 冻结快照继承等）。根因修复验证通过后将在后续版本重新带回。",
+  "pub_date": "2026-09-06T08:28:51.721Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.15.0/Tianshu_3.15.0_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2ROa1VTMUNpbWJwa3FkYXZtUGk1KzloZDJLM1QzYlM1WVFrdW9MQmZHdjVham9ybUZBeFg3RnpZV0o3NTlDaG8yYndBUTBoOVViZDFreXRFUEZsb2dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjgxMzU1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6Cm5CNlhKdk5RYko0bk9HeUdNNGhvTkpzUWZRR0JuRTZ6Y1ZUbUNkZ0NUYzM3ZG83WXdrb0hpZG00ek01WFF4RWMxbmFabzBXZ1VoMGRqQng5UW0rWUJBPT0K"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2ROa1VTMUNpbWJwa3FkYXZtUGk1KzloZDJLM1QzYlM1WVFrdW9MQmZHdjVham9ybUZBeFg3RnpZV0o3NTlDaG8yYndBUTBoOVViZDFreXRFUEZsb2dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjgxMzU1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6Cm5CNlhKdk5RYko0bk9HeUdNNGhvTkpzUWZRR0JuRTZ6Y1ZUbUNkZ0NUYzM3ZG83WXdrb0hpZG00ek01WFF4RWMxbmFabzBXZ1VoMGRqQng5UW0rWUJBPT0K",
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.15.0/Tianshu_3.15.0_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.15.0/Tianshu_3.15.0_x64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1krRkhrbjl3Mnk3QkdVSDIycUMxaCtDcHpOTmZ6ZnZ0dVVrTTlpYTUvT21va1FjNWRoT3krUUhEUmVzV1FkRm9DRFFGaXRHMkQ0WWFHd1dxYnlRcWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjgxOTM0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CkhTTjRGU1dMSDNNRkRJQXVGSm4wWG1XRUcyZG9QZkVPOWN5WlJ5bVJuL3hhVERscGs4UWRhMHpVQjdDNXlYSXRxdENKdHZnVng1VlFPRFRBdVVRMUJRPT0K"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1krRkhrbjl3Mnk3QkdVSDIycUMxaCtDcHpOTmZ6ZnZ0dVVrTTlpYTUvT21va1FjNWRoT3krUUhEUmVzV1FkRm9DRFFGaXRHMkQ0WWFHd1dxYnlRcWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjgxOTM0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CkhTTjRGU1dMSDNNRkRJQXVGSm4wWG1XRUcyZG9QZkVPOWN5WlJ5bVJuL3hhVERscGs4UWRhMHpVQjdDNXlYSXRxdENKdHZnVng1VlFPRFRBdVVRMUJRPT0K",
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.15.0/Tianshu_3.15.0_x64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.15.0/Tianshu_3.15.0_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1VKNTFicFFoTWltcjhhU0lwZjgrc2J5cGxmRHdHekNITzhLT1JnRmFNNkVLaHpUSnBOTkZET0VRRE50Q2tvZUc4VlZWMXRvVUlpcUNjeVU5NlAzU0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjgzMDg1CWZpbGU6VGlhbnNodV8zLjE1LjBfeDY0LXNldHVwLmV4ZQpvc1VyYktKR0srdXJncG80UW9GU2NIclJJN1hLcWsxbk1rQzhxVEFWSlFMWTA0MXQycDJTd1M5WGRZaUxzczVlWjFoNzF2RXprQStWWEpiTjJ3QVdBZz09Cg=="
     }
   }
 }
